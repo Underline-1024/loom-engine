@@ -1,0 +1,33 @@
+[package]
+name = "loom-engine"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "loom_engine"
+path = "src/lib.rs"
+
+[dependencies]
+loom-engine-tool-macro = { path = "../loom-engine-tool-macro" }
+
+anyhow = { workspace = true }
+chrono = { workspace = true }
+hashbrown = { workspace = true }
+meval = { workspace = true }
+regex = { workspace = true }
+reqwest = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+ratatui = { version = "0.30", features = ["crossterm_0_29"] }
+crossterm = "0.29.0"
+thiserror = "2.0.18"
+default = "0.1.2"
+once_cell = "1.21.3"
+rig-core = "0.31.0"
+linkme = "0.3.35"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+tracing = "0.1.44"
+async-trait = "0.1.89"
+ratatui-textarea = "0.9.1"
