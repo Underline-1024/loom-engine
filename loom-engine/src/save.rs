@@ -5,7 +5,7 @@ use chrono::Utc;
 use anyhow::Result;
 use crate::{actor::Stat, config::GameMode, story::Dialogue};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SaveMeta {
     pub timestamp: i64,
     pub note: String,
@@ -114,5 +114,7 @@ impl SaveData {
         let start = self.history.len().saturating_sub(num);
         &self.history[start..]
     }
-    
+    pub fn reset(&mut self, game_mode: GameMode) {
+        *self = Self::new(game_mode);
+    }
 }

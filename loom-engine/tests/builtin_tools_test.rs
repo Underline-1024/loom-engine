@@ -1,5 +1,6 @@
 //! Integration tests for built-in tools.
 
+use loom_engine::config::GameMode;
 use loom_engine::llm::tool::builtin_tools::*;
 use loom_engine::llm::tool::Tool;
 use serde_json::json;
@@ -10,7 +11,7 @@ static INIT: Once = Once::new();
 /// Initialize test state (only once)
 fn setup() {
     INIT.call_once(|| {
-        init_save_data();
+        init_save_data(GameMode::Author);
     });
     // Reset state for each test
     reset_state();

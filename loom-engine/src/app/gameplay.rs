@@ -5,10 +5,12 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use serde_json::Value;
 
-use crate::{actor::Stat, save::SaveData};
+use crate::{actor::Stat, llm::Narrator, save::SaveData};
 use crate::story::Dialogue;
+use crate::llm::tool::builtin_tools::save_data;
 
 use super::{App, Route};
 
@@ -26,6 +28,7 @@ pub struct GameplayState {
     pub input: String,
     pub is_editing: bool,
     pub selected_column: ColumnType,
+    pub pending_llm_response: Option<String>,
 }
 
 impl Default for GameplayState {
@@ -36,6 +39,7 @@ impl Default for GameplayState {
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
+            pending_llm_response: None,
         }
     }
 }
@@ -48,6 +52,7 @@ impl GameplayState {
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
+            pending_llm_response: None,
         }
     }
 }
@@ -115,7 +120,6 @@ impl App {
         
         let scroll_offset = gameplay_state.scroll_offset;
         
-        // 计算可见行数
         let visible_rows = (columns[0].height as usize).saturating_sub(2);
         let visible_rows = visible_rows.max(3);
         
@@ -205,7 +209,6 @@ impl App {
         
         frame.render_widget(list, area);
         
-        // 简单的滚动指示器（避免使用不兼容的 Scrollbar）
         if total_items > visible_rows {
             let scroll_indicator = format!("{}/{}", scroll_offset + 1, total_items);
             let indicator = Paragraph::new(scroll_indicator)
@@ -400,7 +403,7 @@ impl App {
     }
 
     fn render_input_area(frame: &mut Frame, area: Rect, gameplay_state: &GameplayState) {
-        let prefix = if gameplay_state.is_editing { "> " } else { "> " };
+        let prefix = "> ";
         let text = if gameplay_state.is_editing {
             format!("{}{}", prefix, gameplay_state.input)
         } else {
@@ -431,131 +434,321 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    pub fn handle_gameplay_input(&mut self, event: Event) -> Option<String> {
-        let gameplay_state = match &mut self.route {
-            Route::Gameplay(state) => state,
-            _ => return None,
+    pub async fn handle_gameplay_input(&mut self, event: KeyEvent, narrator: &Narrator) {
+        // 先检查是否有待处理的响应
+        let pending_response = if let Route::Gameplay(state) = &mut self.route {
+            state.pending_llm_response.take()
+        } else {
+            None
         };
-
-        if gameplay_state.is_editing {
-            match event {
-                Event::Key(key) => {
-                    match key.code {
-                        KeyCode::Enter => {
-                            gameplay_state.is_editing = false;
-                            let input = gameplay_state.input.clone();
-                            gameplay_state.input.clear();
-                            if !input.is_empty() {
-                                if input.starts_with('/') {
-                                    return Some(input);
-                                }
-                                return Some(input);
-                            }
-                            return None;
-                        }
-                        KeyCode::Esc => {
-                            gameplay_state.is_editing = false;
-                            gameplay_state.input.clear();
-                            return None;
-                        }
-                        KeyCode::Backspace => {
-                            gameplay_state.input.pop();
-                        }
-                        KeyCode::Char(c) => {
-                            if c.is_ascii_graphic() || c.is_whitespace() {
-                                gameplay_state.input.push(c);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-                _ => {}
-            }
-            return None;
+        
+        if let Some(response) = pending_response {
+            self.handle_llm_response(&response).await;
+            return;
         }
         
-        match event {
-            Event::Key(key) => {
-                match key.code {
-                    KeyCode::Enter => {
-                        gameplay_state.is_editing = true;
-                        gameplay_state.input.clear();
-                        return None;
-                    }
-                    KeyCode::Up => {
-                        if gameplay_state.scroll_offset > 0 {
-                            gameplay_state.scroll_offset -= 1;
-                        }
-                        return None;
-                    }
-                    KeyCode::Down => {
-                        let save_data = match &gameplay_state.selected_save_data {
-                            Some(data) => data,
-                            None => return None,
-                        };
-                        
-                        let max_items = match gameplay_state.selected_column {
-                            ColumnType::Stats => save_data.stats.iter()
-                                .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
-                                .count(),
-                            ColumnType::Tags => save_data.stats.iter()
-                                .filter(|(_, stat)| matches!(stat, Stat::Tag))
-                                .count(),
-                            ColumnType::Inventory => save_data.inventory.len(),
-                        };
-                        
-                        let visible_rows = 10;
-                        let max_scroll = max_items.saturating_sub(visible_rows);
-                        if gameplay_state.scroll_offset < max_scroll {
-                            gameplay_state.scroll_offset += 1;
-                        }
-                        return None;
-                    }
-                    KeyCode::Tab => {
-                        gameplay_state.selected_column = match gameplay_state.selected_column {
-                            ColumnType::Stats => ColumnType::Tags,
-                            ColumnType::Tags => ColumnType::Inventory,
-                            ColumnType::Inventory => ColumnType::Stats,
-                        };
-                        gameplay_state.scroll_offset = 0;
-                        return None;
-                    }
-                    KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Some("quit".to_string());
-                    }
-                    _ => {}
+        // 处理输入
+        match &mut self.route {
+            Route::Gameplay(state) => {
+                if state.is_editing {
+                    self.handle_editing_input(event, narrator).await;
+                } else {
+                    self.handle_navigation_input(event);
                 }
             }
             _ => {}
         }
-        
-        None
     }
 
-    pub fn handle_llm_response(&mut self, response: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let gameplay_state = match &mut self.route {
-            Route::Gameplay(state) => state,
-            _ => return Err("Not in gameplay mode".into()),
+    async fn handle_editing_input(
+        &mut self,
+        event: KeyEvent,
+        narrator: &Narrator,
+    ) {
+        let (input, should_process) = {
+            if let Route::Gameplay(state) = &mut self.route {
+                match event.code {
+                    KeyCode::Enter => {
+                        state.is_editing = false;
+                        let input = state.input.clone();
+                        state.input.clear();
+                        (input, true)
+                    }
+                    KeyCode::Esc => {
+                        state.is_editing = false;
+                        state.input.clear();
+                        (String::new(), false)
+                    }
+                    KeyCode::Backspace => {
+                        state.input.pop();
+                        (String::new(), false)
+                    }
+                    KeyCode::Char(c) => {
+                        if c.is_ascii_graphic() || c.is_whitespace() {
+                            state.input.push(c);
+                        }
+                        (String::new(), false)
+                    }
+                    _ => (String::new(), false),
+                }
+            } else {
+                (String::new(), false)
+            }
         };
-    
-        let save_data = match &mut gameplay_state.selected_save_data {
-            Some(data) => data,
-            None => return Err("No save data loaded".into()),
-        };
-    
-        use serde_json::Value;
-        if let Ok(parsed) = serde_json::from_str::<Value>(response) {
-            // 只处理对话内容
-            if let Some(content) = parsed.get("content").and_then(|c| c.as_str()) {
+        
+        if should_process && !input.is_empty() {
+            if input.starts_with('/') {
+                self.handle_command(&input).await;
+            } else {
+                self.handle_player_input(&input, narrator).await;
+            }
+        }
+    }
+
+    async fn handle_command(&mut self, command: &str) {
+        match command {
+            "/help" => {
+                self.show_help_message();
+            }
+            "/save" => {
+                self.save_game().await;
+            }
+            "/load" => {
+                self.load_game().await;
+            }
+            "/quit" => {
+                self.route = Route::MainMenu;
+            }
+            _ => {
+                self.add_dialogue(
+                    "System",
+                    format!("Unknown command: {}", command),
+                );
+            }
+        }
+    }
+
+    async fn handle_player_input(
+        &mut self,
+        input: &str,
+        narrator: &Narrator,
+    ) {
+        // 添加玩家消息到历史
+        self.add_dialogue("Player", input.to_string());
+        
+        // 获取上下文
+        let context = self.build_game_context();
+        
+        // 调用 LLM
+        match narrator.chat(&format!("{}\nPlayer action: {}", context, input)).await {
+            Ok(response) => {
+                // 解析并应用 LLM 响应
+                self.apply_llm_response(&response).await;
+            }
+            Err(e) => {
+                self.add_dialogue(
+                    "System",
+                    format!("Error: {}", e),
+                );
+            }
+        }
+    }
+
+    fn add_dialogue(&mut self, speaker: &str, content: String) {
+        if let Route::Gameplay(state) = &mut self.route {
+            if let Some(save_data) = &mut state.selected_save_data {
                 save_data.history.push(Dialogue::new(
-                    "Narrator".to_string(),
-                    Some(content.to_string()),
+                    speaker.to_string(),
+                    Some(content),
                     None,
                 ));
             }
-            // 其他字段（stats, inventory 等）由工具调用逻辑处理
+        }
+    }
+
+    fn show_help_message(&mut self) {
+        let help_text = vec![
+            "Available commands:".to_string(),
+            "  /help  - Show this help message".to_string(),
+            "  /save  - Save current game".to_string(),
+            "  /load  - Load saved game".to_string(),
+            "  /quit  - Return to main menu".to_string(),
+            "".to_string(),
+            "Controls:".to_string(),
+            "  Enter - Start typing".to_string(),
+            "  ↑/↓   - Scroll".to_string(),
+            "  Tab   - Switch columns".to_string(),
+            "  Esc   - Cancel input".to_string(),
+            "  Ctrl+Q - Quit".to_string(),
+        ].join("\n");
+        
+        self.add_dialogue("System", help_text);
+    }
+
+    async fn save_game(&mut self) {
+        // 使用全局 save_data 获取当前数据并保存
+        let data = save_data();
+        let guard = data.lock().unwrap();
+        let current_data = guard.clone();
+        drop(guard);
+
+        if let Route::Gameplay(state) = &mut self.route {
+            state.selected_save_data = Some(current_data);
+            if let Some(save_meta_id) = self.selected_save_meta_id {
+                if let Ok(project) = self.get_mut_project() {
+                    if let Ok(save_meta) = &mut project.load_save_meta(save_meta_id) {
+                        let _ = project.save(true, Some(save_meta), None, None).await;
+                    }
+                }
+            }
+            
+            
+            self.add_dialogue("System", "Game saved successfully!".to_string());
+        }
+    }
+
+    async fn load_game(&mut self) {
+        // 从全局 save_data 加载最新数据
+        let data = save_data();
+        let guard = data.lock().unwrap();
+        let loaded_data = guard.clone();
+        drop(guard);
+
+        if let Route::Gameplay(state) = &mut self.route {
+            state.selected_save_data = Some(loaded_data);
+            self.add_dialogue("System", "Game loaded successfully!".to_string());
+        }
+    }
+
+    fn build_game_context(&self) -> String {
+        let mut context = String::new();
+        
+        if let Route::Gameplay(state) = &self.route {
+            if let Some(save_data) = &state.selected_save_data {
+                context.push_str("Game context:\n");
+                context.push_str(&format!("- Stats: {:?}\n", save_data.stats));
+                context.push_str(&format!("- Inventory: {:?}\n", save_data.inventory));
+                context.push_str(&format!("- History: {} entries\n", save_data.history.len()));
+                
+                if let Some(last) = save_data.history.last() {
+                    context.push_str(&format!("- Last action: {:?}\n", last));
+                }
+            }
         }
         
-        Ok(())
+        context
+    }
+
+    async fn apply_llm_response(&mut self, response: &str) {
+        // 解析并应用 LLM 响应
+        if let Ok(parsed) = serde_json::from_str::<Value>(response) {
+            // 处理对话内容
+            if let Some(content) = parsed.get("content").and_then(|c| c.as_str()) {
+                self.add_dialogue("Narrator", content.to_string());
+            }
+            
+            // 收集需要更新的数据
+            let mut stats_updates = Vec::new();
+            let mut inventory_updates = Vec::new();
+            
+            if let Route::Gameplay(state) = &self.route {
+                if let Some(save_data) = &state.selected_save_data {
+                    if let Some(stats) = parsed.get("stats").and_then(|s| s.as_object()) {
+                        for (key, value) in stats {
+                            if let Some(num) = value.as_i64() {
+                                stats_updates.push((key.clone(), num));
+                            }
+                        }
+                    }
+                    
+                    if let Some(inventory) = parsed.get("inventory").and_then(|i| i.as_object()) {
+                        for (key, value) in inventory {
+                            if let Some(count) = value.as_u64() {
+                                inventory_updates.push((key.clone(), count));
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // 应用状态更新
+            if let Route::Gameplay(state) = &mut self.route {
+                if let Some(save_data) = &mut state.selected_save_data {
+                    for (key, value) in stats_updates {
+                        if let Some(stat) = save_data.stats.get_mut(&key) {
+                            if let Stat::Numeric(lim) = stat {
+                                let _ = lim.set_value(value);
+                            }
+                        }
+                    }
+                    
+                    for (key, count) in inventory_updates {
+                        if count > 0 {
+                            save_data.inventory.insert(key, count);
+                        } else {
+                            save_data.inventory.remove(&key);
+                        }
+                    }
+                }
+            }
+        } else {
+            // 如果不是 JSON，直接作为叙述
+            self.add_dialogue("Narrator", response.to_string());
+        }
+    }
+
+    async fn handle_llm_response(&mut self, response: &str) {
+        self.apply_llm_response(response).await;
+    }
+    
+    fn handle_navigation_input(&mut self, event: KeyEvent) {
+        if let Route::Gameplay(state) = &mut self.route {
+            match event.code {
+                KeyCode::Enter => {
+                    state.is_editing = true;
+                    state.input.clear();
+                }
+                KeyCode::Up => {
+                    if state.scroll_offset > 0 {
+                        state.scroll_offset -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    let save_data = match &state.selected_save_data {
+                        Some(data) => data,
+                        None => return,
+                    };
+                    
+                    let max_items = match state.selected_column {
+                        ColumnType::Stats => save_data.stats.iter()
+                            .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
+                            .count(),
+                        ColumnType::Tags => save_data.stats.iter()
+                            .filter(|(_, stat)| matches!(stat, Stat::Tag))
+                            .count(),
+                        ColumnType::Inventory => save_data.inventory.len(),
+                    };
+                    
+                    let visible_rows = 10;
+                    let max_scroll = max_items.saturating_sub(visible_rows);
+                    if state.scroll_offset < max_scroll {
+                        state.scroll_offset += 1;
+                    }
+                }
+                KeyCode::Tab => {
+                    state.selected_column = match state.selected_column {
+                        ColumnType::Stats => ColumnType::Tags,
+                        ColumnType::Tags => ColumnType::Inventory,
+                        ColumnType::Inventory => ColumnType::Stats,
+                    };
+                    state.scroll_offset = 0;
+                }
+                KeyCode::Char('q') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.route = Route::MainMenu;
+                }
+                _ => {}
+            }
+        }
+        
     }
 }

@@ -83,7 +83,7 @@ impl App {
 
                         let prompt_text = state.prompt.lines().join("\n");
 
-                        match Project::create(state.name.lines().join(""), state.mode.clone(), prompt_text, narrator).await {
+                        match Project::create(state.name.lines().join(""), state.mode.clone(), prompt_text.as_str(), narrator).await {
                             Ok(project) => {
                                 self.projects.push(Ok(project));
                                 state.error_msg = None;

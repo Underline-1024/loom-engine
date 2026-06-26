@@ -30,15 +30,22 @@ pub enum StatHelper<T> {
 static SAVE_DATA: OnceCell<Arc<Mutex<SaveData>>> = OnceCell::new();
 
 /// Initialize the global save data.
-pub fn init_save_data() {
+pub fn init_save_data(game_mode: GameMode) {
     SAVE_DATA
-        .set(Arc::new(Mutex::new(SaveData::new(GameMode::Author))))
+        .set(Arc::new(Mutex::new(SaveData::new(game_mode))))
         .unwrap();
 }
 
 /// Get a clone of the save data Arc.
 pub fn save_data() -> Arc<Mutex<SaveData>> {
     SAVE_DATA.get().expect("SaveData not initialized!").clone()
+}
+
+/// Reset the global save data to initial state.
+pub fn reset_save_data(game_mode: GameMode) {
+    let data = save_data();
+    let mut guard = data.lock().unwrap();
+    guard.reset(game_mode);
 }
 
 // ============ Item Management Tools ============

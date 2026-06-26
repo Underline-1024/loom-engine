@@ -3,7 +3,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use loom_engine::{llm::Narrator, app::create::CreateState};
 use loom_engine::llm::tool::builtin_tools::init_save_data;
-use loom_engine::config::LlmConfig;
+use loom_engine::config::{GameMode, LlmConfig};
 use ratatui::widgets::ListState;
 use tracing_subscriber::{fmt, EnvFilter};
 use ratatui;
@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     let key_tx = tx.clone();
 
     init_logging();
-    init_save_data();
+    init_save_data(GameMode::default());
     
     let narrator = Narrator::new();
     let dynamic_tool_count = 5;
@@ -79,6 +79,7 @@ async fn main() -> Result<()> {
                     Route::Settings => {},
                     Route::Help => {},
                     Route::Error(_) => app.render_error(frame, frame.area()),
+                    Route::Saves(_) => app.render_saves(frame, frame.area()),
                 }
             })?;
             
@@ -121,8 +122,9 @@ async fn main() -> Result<()> {
                         Route::Projects(_) => app.handle_projects_input(key_code.into()),
                         Route::Settings => {},
                         Route::Help => {},
-                        Route::Gameplay(_) => {},
+                        Route::Gameplay(_) => app.handle_gameplay_input(key_code.into(), &narrator).await,
                         Route::Error(_) => {},
+                        Route::Saves(_) => app.handle_saves_input(key_code.into()),
                     }
                     
                     if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {

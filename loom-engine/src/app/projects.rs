@@ -1,6 +1,6 @@
 use chrono::DateTime;
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span, Text}, widgets::{Block, Borders, List, ListItem, Paragraph, Wrap}, Frame
+    layout::{Alignment, Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style}, text::{Line, Span, Text}, widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap}, Frame
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use anyhow::{bail, Result};
@@ -196,7 +196,7 @@ impl App {
                 if let Some(selected_index) = selected_index {
                     if let Some(Ok(project)) = self.projects.get(selected_index) {
                         let _ = self.select_project(project.timestamp());
-                        self.navigate_to(Route::Gameplay(GameplayState::new(SaveData::default())));//TEST
+                        self.navigate_to(Route::Saves(ListState::default()));
                     }
                 }
             }

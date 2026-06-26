@@ -1,7 +1,7 @@
 {
     "provider": "ollama",
     "enable_dynamic": true,
-    "model": "qwen3:1.7b",
+    "model": "granite4:1b",
     "embedding_model": "nomic-embed-text",
     "system_prompt": "You are an AI narrator in a text-based RPG game. You communicate with players and can invoke tools to perform operations."
 }

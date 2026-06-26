@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 use anyhow::{bail, Result, Context};
-use crate::{config::{GameMode, WorldConfig}, llm::{tool::builtin_tools::save_data, Narrator}, save::{SaveData, SaveMeta}};
+use crate::{config::{GameMode, WorldConfig}, llm::{tool::builtin_tools::{reset_save_data, save_data}, Narrator}, save::{SaveData, SaveMeta}};
 use chrono::Utc;
 
 const PROJECTS_DIR: &str = "projects";
@@ -11,7 +11,7 @@ pub struct Project {
     timestamp: i64,
 }
 impl Project {
-    pub async fn create(name: String, mode: GameMode, prompt: String, narrator: &Narrator) -> Result<Self> {
+    pub async fn create(name: String, game_mode: GameMode, prompt: &str, narrator: &Narrator) -> Result<Self> {
         let path = PathBuf::from(PROJECTS_DIR).join(&name);
         if path.exists() {
             return Err(anyhow::anyhow!("Project '{}' already exists", name));
@@ -20,20 +20,15 @@ impl Project {
         fs::create_dir_all(path.join("saves"))?;
 
         let config_path = path.join("world_config.json");
-        let config = WorldConfig::new(name, mode, prompt.clone());
+        let config = WorldConfig::new(name, game_mode.clone(), prompt.to_string());
         fs::write(&config_path, serde_json::to_string_pretty(&config)?)?;
-
-        let _ = narrator.chat(&prompt).await;
-        let data = save_data();
-        let guard = data.lock().unwrap();
 
         let project = Self {
             path,
             config,
             timestamp: Utc::now().timestamp_millis(),
         };
-        let note = "".to_string();
-        let _ = project.create_save(note, guard.clone());
+        let _ = project.save(false, None, None, Some((narrator, game_mode, prompt))).await;
         Ok(project)
     }
     pub fn open(name: &str, update_timestamp: bool) -> Result<Self> {
@@ -69,33 +64,8 @@ impl Project {
     pub fn config(&self) -> &WorldConfig {
         &self.config
     }
-    pub fn create_save(&self, note: String, data: SaveData) -> Result<SaveMeta> {
-        let ts = Utc::now().timestamp_millis();
-        
-        let mut meta = SaveMeta::new(note.clone());
-        meta.timestamp = ts;
-        meta.main_filename = format!("save_{}.json", ts);
-
-        let save_path = meta.main_file_path(&self.path);
-        let meta_path = meta.meta_file_path(&self.path);
-
-        if save_path.exists() || meta_path.exists() {
-            bail!("Save with timestamp {} already exists.", ts);
-        }
-
-        let meta_json = serde_json::to_string_pretty(&meta)?;
-        fs::write(&meta_path, meta_json)
-            .with_context(|| format!("Failed to write meta file: {:?}", meta_path))?;
-
-        let save_json = serde_json::to_string_pretty(&data)?;
-        fs::write(&save_path, save_json)
-            .with_context(|| format!("Failed to write save file: {:?}", save_path))?;
-
-        Ok(meta)
-    }
     pub fn list_saves(&self) -> Result<Vec<Result<SaveMeta>>> {
         let saves_dir = self.path.join("saves");
-        
         if !saves_dir.exists() {
             return Ok(Vec::new());
         }
@@ -112,8 +82,8 @@ impl Project {
             };
             
             let path = entry.path();
-
-            if path.extension().map_or(false, |ext| ext == "meta.json") {
+            
+            if path.to_str().map_or(false, |s| s.ends_with(".meta.json")) {
                 let res = (|| -> Result<SaveMeta> {
                     let content = fs::read_to_string(&path)
                         .with_context(|| format!("Failed to read meta: {:?}", path))?;
@@ -154,44 +124,112 @@ impl Project {
         let json = fs::read_to_string(&path)?;
         Ok(serde_json::from_str(&json)?)
     }
-    pub fn save(&self, old_meta: SaveMeta, note: String, data: SaveData) -> Result<SaveMeta> {
-        let new_ts = Utc::now().timestamp_millis();
+    
+    pub fn load_save_meta(&self, timestamp: i64) -> Result<SaveMeta> {
+        let path = self.path.join("saves").join(format!("save_{}.meta.json", timestamp));
+        let json = fs::read_to_string(&path)?;
+        Ok(serde_json::from_str(&json)?)
+    }
+    
+    /// 保存存档（统一入口）
+    /// - overwrite: true 覆盖当前存档，false 创建新存档
+    /// - meta: 存档元数据
+    ///   * overwrite 为 true 时：要覆盖的存档
+    ///   * overwrite 为 false 时：如果提供则加载该存档数据作为另存为的基础
+    /// - note: 存档备注，None 则为空字符串
+    /// - narrator_gamemode_prompt: 用于初始化世界数据（仅创建新存档且不加载旧数据时有效）
+    pub async fn save(
+        &self, 
+        overwrite: bool,
+        meta: Option<&mut SaveMeta>,
+        note: Option<String>, 
+        narrator_gamemode_prompt: Option<(&Narrator, GameMode, &str)>
+    ) -> Result<SaveMeta> {
+        let data = save_data();
+        let note = note.unwrap_or_default();
 
-        let old_save_path = old_meta.main_file_path(&self.path);
-        let old_meta_path = old_meta.meta_file_path(&self.path);
+        if overwrite {
+            // 覆盖模式：直接修改原文件
+            let meta = meta.ok_or_else(|| anyhow::anyhow!("Meta is required for overwrite"))?;
+            
+            let save_path = meta.main_file_path(&self.path);
+            let meta_path = meta.meta_file_path(&self.path);
 
-        let new_save_filename = format!("save_{}.json", new_ts);
-        let new_save_path = self.path.join("saves").join(&new_save_filename);
-        
-        let new_meta_filename = format!("save_{}.meta.json", new_ts);
-        let new_meta_path = self.path.join("saves").join(&new_meta_filename);
+            if !save_path.exists() {
+                bail!("Save file not found: {:?}", save_path);
+            }
+            if !meta_path.exists() {
+                bail!("Meta file not found: {:?}", meta_path);
+            }
 
-        if !old_save_path.exists() {
-            bail!("Old save file not found: {:?}", old_save_path);
+            // 更新时间戳和备注
+            meta.timestamp = Utc::now().timestamp_millis();
+            meta.note = note;
+
+            // 覆盖写入
+            let guard = data.lock().unwrap();
+            let save_json = serde_json::to_string_pretty(&guard.clone())?;
+            fs::write(&save_path, save_json)
+                .with_context(|| format!("Failed to write save file: {:?}", save_path))?;
+
+            let meta_json = serde_json::to_string_pretty(&meta)?;
+            fs::write(&meta_path, meta_json)
+                .with_context(|| format!("Failed to write meta file: {:?}", meta_path))?;
+
+            Ok(meta.clone())
+        } else {
+            // 创建新存档
+            if let Some(meta) = meta {
+                // 另存为：加载旧存档数据
+                let old_data = self.load_save(meta.timestamp)?;
+                let mut guard = data.lock().unwrap();
+                *guard = old_data;
+            } else if let Some((n, game_mode, prompt)) = narrator_gamemode_prompt {
+                // 创建新存档：初始化世界数据
+                reset_save_data(game_mode);
+                let _ = n.chat(prompt).await;
+            }
+            // 如果既没有 meta 也没有 narrator_gamemode_prompt，使用当前全局 save_data
+
+            let ts = Utc::now().timestamp_millis();
+            
+            let mut new_meta = SaveMeta::new(note);
+            new_meta.timestamp = ts;
+            new_meta.main_filename = format!("save_{}.json", ts);
+
+            let save_path = new_meta.main_file_path(&self.path);
+            let meta_path = new_meta.meta_file_path(&self.path);
+
+            if save_path.exists() || meta_path.exists() {
+                bail!("Save with timestamp {} already exists.", ts);
+            }
+
+            let guard = data.lock().unwrap();
+            let meta_json = serde_json::to_string_pretty(&new_meta)?;
+            fs::write(&meta_path, meta_json)
+                .with_context(|| format!("Failed to write meta file: {:?}", meta_path))?;
+
+            let save_json = serde_json::to_string_pretty(&guard.clone())?;
+            fs::write(&save_path, save_json)
+                .with_context(|| format!("Failed to write save file: {:?}", save_path))?;
+
+            Ok(new_meta)
         }
-        if !old_meta_path.exists() {
-            bail!("Old meta file not found: {:?}", old_meta_path);
+    }
+    pub fn update_save_note(&self, meta: &mut SaveMeta, note: String) -> Result<()> {
+        let meta_path = meta.meta_file_path(&self.path);
+        
+        if !meta_path.exists() {
+            bail!("Meta file not found: {:?}", meta_path);
         }
-
-        let mut new_meta = SaveMeta::new(note);
-        new_meta.timestamp = new_ts;
-        new_meta.main_filename = new_save_filename.clone();
-
-        let save_json = serde_json::to_string_pretty(&data)?;
-        fs::write(&old_save_path, &save_json)
-            .with_context(|| format!("Failed to write content to {:?}", old_save_path))?;
         
-        fs::rename(&old_save_path, &new_save_path)
-            .with_context(|| format!("Failed to rename save {:?} to {:?}", old_save_path, new_save_path))?;
-
-        let meta_json = serde_json::to_string_pretty(&new_meta)?;
-        fs::write(&old_meta_path, &meta_json)
-            .with_context(|| format!("Failed to write content to {:?}", old_meta_path))?;
+        meta.note = note;
         
-        fs::rename(&old_meta_path, &new_meta_path)
-            .with_context(|| format!("Failed to rename meta {:?} to {:?}", old_meta_path, new_meta_path))?;
-
-        Ok(new_meta)
+        let meta_json = serde_json::to_string_pretty(&meta)?;
+        fs::write(&meta_path, meta_json)
+            .with_context(|| format!("Failed to write meta file: {:?}", meta_path))?;
+        
+        Ok(())
     }
     pub fn delete_save(&self, timestamp: i64) -> Result<()> {
         let save_path = self.path.join("saves").join(format!("save_{}.json", timestamp));
