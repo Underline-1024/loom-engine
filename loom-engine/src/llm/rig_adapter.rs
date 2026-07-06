@@ -6,10 +6,12 @@
 //!
 //! 本模块使用泛型设计，支持任何 Rig 支持的 LLM 提供商。
 
+use rig::agent::AgentBuilder;
 use rig::client::{CompletionClient, EmbeddingsClient, ProviderClient};
 use rig::tool::ToolSet;
 use rig::vector_store::in_memory_store::InMemoryVectorStore;
 
+use crate::config::LlmConfig;
 use crate::llm::tool::get_tools;
 
 
@@ -34,8 +36,19 @@ pub async fn create_rig_agent<C>(
 where
     C: ProviderClient + CompletionClient + Clone,
 {
-    let agent = client
-        .agent(model)
+    let config = LlmConfig::load()?; 
+    let max_tokens_opt = config.max_tokens;
+
+    // 直接使用 AgentBuilder
+    let mut agent_builder = AgentBuilder::new(client.completion_model(model));
+    
+    // 设置 max_tokens（如果存在）
+    if let Some(max_tokens) = max_tokens_opt {
+        agent_builder = agent_builder.max_tokens(max_tokens);
+    }
+
+    // 添加 preamble 和 tools，然后 build
+    let agent = agent_builder
         .preamble(preamble)
         .tools(get_tools())
         .build();
@@ -68,23 +81,25 @@ where
     C: ProviderClient + CompletionClient + EmbeddingsClient + Clone,
     C::EmbeddingModel: Clone + 'static,
 {
+    // 读取配置
+    let config = LlmConfig::load()?; 
+    let max_tokens_opt = config.max_tokens;
+
     // 创建 ToolSet
     let toolset = ToolSet::from_tools_boxed(get_tools());
     
-    // 获取嵌入模型（使用指定的嵌入模型名称）
+    // 获取嵌入模型
     let embedding_model = client.embedding_model(embedding_model);
     
-    // 将工具转换为 schemas（用于嵌入）
+    // 将工具转换为 schemas
     let schemas = toolset.schemas()?;
     
     // 创建嵌入构建器
     let mut builder = rig::embeddings::EmbeddingsBuilder::new(embedding_model.clone());
     
-    // 添加每个工具的文档到嵌入构建器
     for schema in schemas {
         builder = builder.document(schema)?;
     }
-    
     
     // 构建嵌入
     let embeddings = builder.build().await?;
@@ -96,12 +111,18 @@ where
     let index = vector_store.index(embedding_model);
     
     // 创建 Agent 并添加动态工具
-    let agent = client
+    let mut agent_builder = client
         .agent(model)
         .preamble(preamble)
         .tools(get_tools())
-        .dynamic_tools(dynamic_tool_count, index, toolset)
-        .build();
+        .dynamic_tools(dynamic_tool_count, index, toolset);
+    
+    // 🔥 如果配置了 max_tokens，就设置
+    if let Some(max_tokens) = max_tokens_opt {
+        agent_builder = agent_builder.max_tokens(max_tokens);
+    }
+    
+    let agent = agent_builder.build();
     
     Ok(agent)
 }

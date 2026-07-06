@@ -36,6 +36,8 @@ pub struct LlmConfig {
     #[serde(default)]
     pub embedding_model: Option<String>,
     pub system_prompt: String,
+    #[serde(default)]
+    pub max_tokens: Option<u64>,
 }
 impl LlmConfig {
     pub fn load() -> Result<Self> {

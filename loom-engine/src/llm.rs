@@ -75,6 +75,35 @@ impl Narrator {
         config: &LlmConfig,
         dynamic_tool_count: usize,
     ) -> Result<Box<dyn DynAgent>> {
+        // ⬇️ 特殊处理 Anthropic
+        if config.provider == "anthropic" {
+            // 模仿 OpenAI 的实现
+            let base_url: Option<String> = std::env::var("ANTHROPIC_BASE_URL").ok();
+            let api_key = std::env::var("ANTHROPIC_API_KEY")
+                .context("ANTHROPIC_API_KEY not set in environment")?;
+            
+            let mut builder = rig::providers::anthropic::Client::builder()
+                .api_key(&api_key);
+            
+            if let Some(base) = base_url {
+                builder = builder.base_url(&base);
+                tracing::info!("Using custom base_url from env: {}", base);
+            }
+            
+            let client = builder.build()
+                .map_err(|e| anyhow::anyhow!("Failed to build Anthropic client: {}", e))?;
+            
+            let agent = create_rig_agent(
+                client,
+                &config.model,
+                &config.system_prompt,
+            ).await
+            .context("Failed to create Anthropic agent")?;
+            
+            let boxed: Box<dyn DynAgent> = Box::new(agent);
+            return Ok(boxed);
+        }
+
         if config.enable_dynamic {
             provider_match!(config, dynamic_tool_count,
                 "azure" => azure @ dynamic,
