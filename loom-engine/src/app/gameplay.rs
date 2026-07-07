@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
     Frame,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -19,16 +19,19 @@ pub enum ColumnType {
     Stats,
     Tags,
     Inventory,
+    Dialogue,
 }
 
 #[derive(Debug, Clone)]
 pub struct GameplayState {
     pub selected_save_data: Option<SaveData>,
     pub scroll_offset: usize,
+    pub dialogue_scroll_offset: usize,
     pub input: String,
     pub is_editing: bool,
     pub selected_column: ColumnType,
     pub pending_llm_response: Option<String>,
+    pub is_processing: bool,
 }
 
 impl Default for GameplayState {
@@ -36,10 +39,12 @@ impl Default for GameplayState {
         Self {
             selected_save_data: None,
             scroll_offset: 0,
+            dialogue_scroll_offset: 0,
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
             pending_llm_response: None,
+            is_processing: false,
         }
     }
 }
@@ -49,10 +54,12 @@ impl GameplayState {
         Self {
             selected_save_data: Some(save_data),
             scroll_offset: 0,
+            dialogue_scroll_offset: 0,
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
             pending_llm_response: None,
+            is_processing: false,
         }
     }
 }
@@ -83,6 +90,7 @@ impl App {
             }
         };
 
+        // 主边框
         let outer_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::White))
@@ -92,50 +100,51 @@ impl App {
         let inner_area = outer_block.inner(area);
         frame.render_widget(outer_block, area);
         
+        // 主布局：上(列+对话) / 输入 / 帮助
         let main_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Percentage(70),
+                Constraint::Percentage(75),
                 Constraint::Length(3),
                 Constraint::Length(1),
             ])
             .split(inner_area);
         
+        // 上部分：列(左) / 对话历史(右)
         let top_chunks = Layout::default()
-            .direction(Direction::Vertical)
+            .direction(Direction::Horizontal)
             .constraints([
-                Constraint::Percentage(55),
-                Constraint::Percentage(45),
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
             ])
             .split(main_chunks[0]);
         
-        let columns = Layout::default()
+        // 左侧：三列
+        let left_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([
                 Constraint::Percentage(40),
-                Constraint::Percentage(25),
-                Constraint::Percentage(35),
+                Constraint::Percentage(30),
+                Constraint::Percentage(30),
             ])
             .split(top_chunks[0]);
         
         let scroll_offset = gameplay_state.scroll_offset;
+        let dialogue_scroll_offset = gameplay_state.dialogue_scroll_offset;
         
-        let visible_rows = (columns[0].height as usize).saturating_sub(2);
+        // 计算可见行数
+        let visible_rows = (left_chunks[0].height as usize).saturating_sub(2);
         let visible_rows = visible_rows.max(3);
         
-        let stats_count = save_data.stats.iter()
-            .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
-            .count();
-        let tags_count = save_data.stats.iter()
-            .filter(|(_, stat)| matches!(stat, Stat::Tag))
-            .count();
-        let inventory_count = save_data.inventory.len();
+        // 渲染三列
+        Self::render_numeric_stats(save_data, frame, left_chunks[0], scroll_offset, visible_rows);
+        Self::render_tag_stats(save_data, frame, left_chunks[1], scroll_offset, visible_rows);
+        Self::render_inventory(save_data, frame, left_chunks[2], scroll_offset, visible_rows);
         
-        Self::render_numeric_stats(save_data, frame, columns[0], scroll_offset, stats_count, visible_rows);
-        Self::render_tag_stats(save_data, frame, columns[1], scroll_offset, tags_count, visible_rows);
-        Self::render_inventory(save_data, frame, columns[2], scroll_offset, inventory_count, visible_rows);
+        // 右侧：对话历史
+        Self::render_dialogue_history(save_data, frame, top_chunks[1], dialogue_scroll_offset);
         
-        Self::render_dialogue_history(save_data, frame, top_chunks[1]);
+        // 底部：输入和帮助
         Self::render_input_area(frame, main_chunks[1], gameplay_state);
         Self::render_help_bar(frame, main_chunks[2]);
     }
@@ -145,7 +154,6 @@ impl App {
         frame: &mut Frame, 
         area: Rect, 
         scroll_offset: usize,
-        total_items: usize,
         visible_rows: usize,
     ) {
         let stats: Vec<(&String, &Stat)> = save_data.stats
@@ -153,12 +161,29 @@ impl App {
             .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
             .collect();
         
+        // 标题
+        let title = Paragraph::new(" Stats ")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        let title_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(title, title_area);
+        
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+        
         if stats.is_empty() {
             let empty_text = "No numeric stats";
             let paragraph = Paragraph::new(empty_text)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::LEFT | Borders::RIGHT));
-            frame.render_widget(paragraph, area);
+                .style(Style::default().fg(Color::DarkGray));
+            frame.render_widget(paragraph, content_area);
             return;
         }
         
@@ -174,17 +199,17 @@ impl App {
                     let percentage = if max > 0 { (current as f64 / max as f64 * 100.0) as u16 } else { 0 };
                     
                     let bar_width = area.width.saturating_sub(6) as usize;
-                    let bar_width = bar_width.min(50);
+                    let bar_width = bar_width.min(30);
                     let filled = (bar_width as f64 * percentage as f64 / 100.0) as usize;
                     let empty = bar_width.saturating_sub(filled);
                     
-                    let bar = if bar_width > 0 {
+                    let bar = if bar_width > 0 && percentage > 0 {
                         format!("[{}{}]", "█".repeat(filled), "░".repeat(empty))
                     } else {
                         String::new()
                     };
                     
-                    let text = if bar_width > 0 {
+                    let text = if !bar.is_empty() {
                         format!("{}: {}/{} {}", name, current, max, bar)
                     } else {
                         format!("{}: {}/{}", name, current, max)
@@ -204,21 +229,19 @@ impl App {
             .collect();
         
         let list = List::new(items)
-            .block(Block::default().borders(Borders::LEFT | Borders::RIGHT))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
         
-        frame.render_widget(list, area);
+        frame.render_widget(list, content_area);
         
-        if total_items > visible_rows {
-            let scroll_indicator = format!("{}/{}", scroll_offset + 1, total_items);
-            let indicator = Paragraph::new(scroll_indicator)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default());
+        if stats.len() > visible_rows {
+            let scroll_indicator = format!("{}/{}", start + 1, stats.len());
+            let indicator = Paragraph::new(scroll_indicator.clone())
+                .style(Style::default().fg(Color::DarkGray));
             let indicator_area = Rect {
-                x: area.x + area.width - 1,
-                y: area.y,
-                width: 1,
-                height: area.height,
+                x: content_area.x + content_area.width - scroll_indicator.len() as u16 - 1,
+                y: content_area.y + content_area.height - 1,
+                width: scroll_indicator.len() as u16 + 1,
+                height: 1,
             };
             frame.render_widget(indicator, indicator_area);
         }
@@ -229,7 +252,6 @@ impl App {
         frame: &mut Frame, 
         area: Rect, 
         scroll_offset: usize,
-        total_items: usize,
         visible_rows: usize,
     ) {
         let tags: Vec<(&String, &Stat)> = save_data.stats
@@ -237,12 +259,29 @@ impl App {
             .filter(|(_, stat)| matches!(stat, Stat::Tag))
             .collect();
         
+        // 标题
+        let title = Paragraph::new(" Tags ")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        let title_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(title, title_area);
+        
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+        
         if tags.is_empty() {
             let empty_text = "No tags";
             let paragraph = Paragraph::new(empty_text)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::LEFT | Borders::RIGHT));
-            frame.render_widget(paragraph, area);
+                .style(Style::default().fg(Color::DarkGray));
+            frame.render_widget(paragraph, content_area);
             return;
         }
         
@@ -253,27 +292,25 @@ impl App {
         let items: Vec<ListItem> = visible_tags.iter()
             .map(|(name, _)| {
                 ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{}]", name), Style::default().fg(Color::Cyan))
+                    Span::styled(format!("• {}", name), Style::default().fg(Color::Cyan))
                 ]))
             })
             .collect();
         
         let list = List::new(items)
-            .block(Block::default().borders(Borders::LEFT | Borders::RIGHT))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
         
-        frame.render_widget(list, area);
+        frame.render_widget(list, content_area);
         
-        if total_items > visible_rows {
-            let scroll_indicator = format!("{}/{}", scroll_offset + 1, total_items);
-            let indicator = Paragraph::new(scroll_indicator)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default());
+        if tags.len() > visible_rows {
+            let scroll_indicator = format!("{}/{}", start + 1, tags.len());
+            let indicator = Paragraph::new(scroll_indicator.clone())
+                .style(Style::default().fg(Color::DarkGray));
             let indicator_area = Rect {
-                x: area.x + area.width - 1,
-                y: area.y,
-                width: 1,
-                height: area.height,
+                x: content_area.x + content_area.width - scroll_indicator.len() as u16 - 1,
+                y: content_area.y + content_area.height - 1,
+                width: scroll_indicator.len() as u16 + 1,
+                height: 1,
             };
             frame.render_widget(indicator, indicator_area);
         }
@@ -284,19 +321,35 @@ impl App {
         frame: &mut Frame, 
         area: Rect, 
         scroll_offset: usize,
-        total_items: usize,
         visible_rows: usize,
     ) {
         let inventory: Vec<(&String, &u64)> = save_data.inventory
             .iter()
             .collect();
         
+        // 标题
+        let title = Paragraph::new(" Inventory ")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        let title_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(title, title_area);
+        
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(1),
+        };
+        
         if inventory.is_empty() {
             let empty_text = "Inventory empty";
             let paragraph = Paragraph::new(empty_text)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::LEFT | Borders::RIGHT));
-            frame.render_widget(paragraph, area);
+                .style(Style::default().fg(Color::DarkGray));
+            frame.render_widget(paragraph, content_area);
             return;
         }
         
@@ -307,7 +360,7 @@ impl App {
         let items: Vec<ListItem> = visible_items.iter()
             .map(|(name, count)| {
                 let text = if **count > 1 {
-                    format!("{} x{}", name, count)
+                    format!("{} ×{}", name, count)
                 } else {
                     name.to_string()
                 };
@@ -318,57 +371,87 @@ impl App {
             .collect();
         
         let list = List::new(items)
-            .block(Block::default().borders(Borders::LEFT | Borders::RIGHT))
             .highlight_style(Style::default().add_modifier(Modifier::BOLD));
         
-        frame.render_widget(list, area);
+        frame.render_widget(list, content_area);
         
-        if total_items > visible_rows {
-            let scroll_indicator = format!("{}/{}", scroll_offset + 1, total_items);
-            let indicator = Paragraph::new(scroll_indicator)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default());
+        if inventory.len() > visible_rows {
+            let scroll_indicator = format!("{}/{}", start + 1, inventory.len());
+            let indicator = Paragraph::new(scroll_indicator.clone())
+                .style(Style::default().fg(Color::DarkGray));
             let indicator_area = Rect {
-                x: area.x + area.width - 1,
-                y: area.y,
-                width: 1,
-                height: area.height,
+                x: content_area.x + content_area.width - scroll_indicator.len() as u16 - 1,
+                y: content_area.y + content_area.height - 1,
+                width: scroll_indicator.len() as u16 + 1,
+                height: 1,
             };
             frame.render_widget(indicator, indicator_area);
         }
     }
 
-    fn render_dialogue_history(save_data: &SaveData, frame: &mut Frame, area: Rect) {
+    fn render_dialogue_history(
+        save_data: &SaveData, 
+        frame: &mut Frame, 
+        area: Rect,
+        scroll_offset: usize,
+    ) {
         let history = &save_data.history;
-        let max_lines = (area.height as usize).saturating_sub(2);
-        let start = if history.len() > max_lines { history.len() - max_lines } else { 0 };
-        let recent: Vec<&Dialogue> = history.iter().skip(start).collect();
         
-        if recent.is_empty() {
+        // 标题
+        let title = Paragraph::new(" Dialogue History ")
+            .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        let title_area = Rect {
+            x: area.x,
+            y: area.y,
+            width: area.width,
+            height: 1,
+        };
+        frame.render_widget(title, title_area);
+        
+        let content_area = Rect {
+            x: area.x,
+            y: area.y + 1,
+            width: area.width,
+            height: area.height.saturating_sub(2),
+        };
+        
+        if history.is_empty() {
             let empty_text = "No dialogue history";
             let paragraph = Paragraph::new(empty_text)
-                .style(Style::default().fg(Color::DarkGray))
-                .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::RIGHT));
-            frame.render_widget(paragraph, area);
+                .style(Style::default().fg(Color::DarkGray));
+            frame.render_widget(paragraph, content_area);
             return;
         }
         
-        let lines: Vec<Line> = recent.iter()
+        let max_lines = content_area.height as usize;
+        let total_lines = history.len();
+        
+        // 使用 scroll_offset 控制显示范围
+        let start = if total_lines > max_lines {
+            scroll_offset.min(total_lines - max_lines)
+        } else {
+            0
+        };
+        let end = (start + max_lines).min(total_lines);
+        let visible: Vec<&Dialogue> = history.iter().skip(start).take(end - start).collect();
+        
+        let lines: Vec<Line> = visible.iter()
             .map(|dialogue| {
                 let timestamp = chrono::DateTime::from_timestamp_millis(dialogue.timestamp)
                     .map(|dt| dt.format("%H:%M:%S").to_string())
                     .unwrap_or_else(|| dialogue.timestamp.to_string());
                 
                 let (speaker_style, speaker_prefix) = match dialogue.speaker.as_str() {
-                    "Narrator" => (Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD), "Narrator".to_string()),
-                    "Player" => (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD), "Player".to_string()),
-                    "System" => (Style::default().fg(Color::Red), "System".to_string()),
-                    _ => (Style::default().fg(Color::Cyan), dialogue.speaker.clone()),
+                    "Narrator" => (Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD), "📖"),
+                    "Player" => (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD), "👤"),
+                    "System" => (Style::default().fg(Color::Red), "⚙️"),
+                    _ => (Style::default().fg(Color::Cyan), "❓"),
                 };
                 
                 let mut spans = vec![
                     Span::styled(format!("[{}] ", timestamp), Style::default().fg(Color::DarkGray)),
-                    Span::styled(format!("{}:", speaker_prefix), speaker_style),
+                    Span::styled(format!("{} ", speaker_prefix), speaker_style),
+                    Span::styled(format!("{}:", dialogue.speaker), speaker_style),
                 ];
                 
                 if let Some(content) = &dialogue.content {
@@ -397,39 +480,61 @@ impl App {
         
         let text = Text::from(lines);
         let paragraph = Paragraph::new(text)
-            .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::RIGHT));
+            .wrap(Wrap { trim: true });
         
-        frame.render_widget(paragraph, area);
+        frame.render_widget(paragraph, content_area);
+        
+        if total_lines > max_lines {
+            let scroll_indicator = format!("{}/{}", start + 1, total_lines);
+            let indicator = Paragraph::new(scroll_indicator.clone())
+                .style(Style::default().fg(Color::DarkGray));
+            let indicator_area = Rect {
+                x: content_area.x + content_area.width - scroll_indicator.len() as u16 - 1,
+                y: content_area.y + content_area.height - 1,
+                width: scroll_indicator.len() as u16 + 1,
+                height: 1,
+            };
+            frame.render_widget(indicator, indicator_area);
+        }
     }
 
     fn render_input_area(frame: &mut Frame, area: Rect, gameplay_state: &GameplayState) {
         let prefix = "> ";
-        let text = if gameplay_state.is_editing {
-            format!("{}{}", prefix, gameplay_state.input)
+        let input_text = if gameplay_state.is_editing {
+            if gameplay_state.is_processing {
+                format!("{}Processing...", prefix)
+            } else {
+                format!("{}{}", prefix, gameplay_state.input)
+            }
         } else {
             format!("{}[Press Enter to input]", prefix)
         };
         
-        let style = if gameplay_state.is_editing {
+        let style = if gameplay_state.is_editing && !gameplay_state.is_processing {
             Style::default().fg(Color::White)
+        } else if gameplay_state.is_processing {
+            Style::default().fg(Color::Yellow)
         } else {
             Style::default().fg(Color::DarkGray)
         };
         
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled(text, style)
-        ]))
-        .block(Block::default().borders(Borders::TOP | Borders::LEFT | Borders::RIGHT));
+        let paragraph = Paragraph::new(input_text)
+            .style(style)
+            .wrap(Wrap { trim: true })
+            .block(Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::Gray)));
         
         frame.render_widget(paragraph, area);
     }
 
     fn render_help_bar(frame: &mut Frame, area: Rect) {
-        let help_text = "Enter:Input | ↑↓:Scroll | Tab:Switch Column | /help:Commands | Esc:Cancel | Ctrl+Q:Quit";
-        let paragraph = Paragraph::new(Line::from(vec![
-            Span::styled(help_text, Style::default().fg(Color::DarkGray))
-        ]))
-        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM));
+        let help_text = "Enter:Input | ↑↓:Scroll | Tab:Switch Column | Esc:Cancel | Ctrl+Q:Quit";
+        let paragraph = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .block(Block::default()
+                .borders(Borders::TOP)
+                .border_style(Style::default().fg(Color::Gray)));
         
         frame.render_widget(paragraph, area);
     }
@@ -450,13 +555,13 @@ impl App {
         // 处理输入
         match &mut self.route {
             Route::Gameplay(state) => {
-                if state.is_editing {
+                if state.is_editing && !state.is_processing {
                     self.handle_editing_input(event, narrator).await;
                 } else {
                     self.handle_navigation_input(event);
                 }
-            }
-            _ => {}
+            },
+            _ => {},
         }
     }
 
@@ -469,26 +574,29 @@ impl App {
             if let Route::Gameplay(state) = &mut self.route {
                 match event.code {
                     KeyCode::Enter => {
-                        state.is_editing = false;
-                        let input = state.input.clone();
-                        state.input.clear();
-                        (input, true)
-                    }
+                        if !state.input.is_empty() && !state.is_processing {
+                            state.is_editing = false;
+                            let input = state.input.clone();
+                            state.input.clear();
+                            (input, true)
+                        } else {
+                            (String::new(), false)
+                        }
+                    },
                     KeyCode::Esc => {
                         state.is_editing = false;
                         state.input.clear();
                         (String::new(), false)
-                    }
+                    },
                     KeyCode::Backspace => {
                         state.input.pop();
                         (String::new(), false)
-                    }
+                    },
                     KeyCode::Char(c) => {
-                        if c.is_ascii_graphic() || c.is_whitespace() {
-                            state.input.push(c);
-                        }
+                        // 支持所有 Unicode 字符（包括中文）
+                        state.input.push(c);
                         (String::new(), false)
-                    }
+                    },
                     _ => (String::new(), false),
                 }
             } else {
@@ -509,22 +617,22 @@ impl App {
         match command {
             "/help" => {
                 self.show_help_message();
-            }
+            },
             "/save" => {
                 self.save_game().await;
-            }
+            },
             "/load" => {
                 self.load_game().await;
-            }
+            },
             "/quit" => {
                 self.route = Route::MainMenu;
-            }
+            },
             _ => {
                 self.add_dialogue(
                     "System",
                     format!("Unknown command: {}", command),
                 );
-            }
+            },
         }
     }
 
@@ -533,6 +641,11 @@ impl App {
         input: &str,
         narrator: &Narrator,
     ) {
+        // 设置处理状态
+        if let Route::Gameplay(state) = &mut self.route {
+            state.is_processing = true;
+        }
+        
         // 添加玩家消息到历史
         self.add_dialogue("Player", input.to_string());
         
@@ -544,13 +657,18 @@ impl App {
             Ok(response) => {
                 // 解析并应用 LLM 响应
                 self.apply_llm_response(&response).await;
-            }
+            },
             Err(e) => {
                 self.add_dialogue(
                     "System",
                     format!("Error: {}", e),
                 );
-            }
+            },
+        }
+        
+        // 清除处理状态
+        if let Route::Gameplay(state) = &mut self.route {
+            state.is_processing = false;
         }
     }
 
@@ -562,6 +680,8 @@ impl App {
                     Some(content),
                     None,
                 ));
+                // 自动滚动到最新消息
+                state.dialogue_scroll_offset = save_data.history.len().saturating_sub(1);
             }
         }
     }
@@ -601,7 +721,6 @@ impl App {
                     }
                 }
             }
-            
             
             self.add_dialogue("System", "Game saved successfully!".to_string());
         }
@@ -652,7 +771,7 @@ impl App {
             let mut inventory_updates = Vec::new();
             
             if let Route::Gameplay(state) = &self.route {
-                if let Some(save_data) = &state.selected_save_data {
+                if let Some(_save_data) = &state.selected_save_data {
                     if let Some(stats) = parsed.get("stats").and_then(|s| s.as_object()) {
                         for (key, value) in stats {
                             if let Some(num) = value.as_i64() {
@@ -707,48 +826,67 @@ impl App {
                 KeyCode::Enter => {
                     state.is_editing = true;
                     state.input.clear();
-                }
+                },
                 KeyCode::Up => {
-                    if state.scroll_offset > 0 {
-                        state.scroll_offset -= 1;
+                    if state.selected_column == ColumnType::Dialogue {
+                        if state.dialogue_scroll_offset > 0 {
+                            state.dialogue_scroll_offset -= 1;
+                        }
+                    } else {
+                        if state.scroll_offset > 0 {
+                            state.scroll_offset -= 1;
+                        }
                     }
-                }
+                },
                 KeyCode::Down => {
-                    let save_data = match &state.selected_save_data {
-                        Some(data) => data,
-                        None => return,
-                    };
-                    
-                    let max_items = match state.selected_column {
-                        ColumnType::Stats => save_data.stats.iter()
-                            .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
-                            .count(),
-                        ColumnType::Tags => save_data.stats.iter()
-                            .filter(|(_, stat)| matches!(stat, Stat::Tag))
-                            .count(),
-                        ColumnType::Inventory => save_data.inventory.len(),
-                    };
-                    
-                    let visible_rows = 10;
-                    let max_scroll = max_items.saturating_sub(visible_rows);
-                    if state.scroll_offset < max_scroll {
-                        state.scroll_offset += 1;
+                    if state.selected_column == ColumnType::Dialogue {
+                        if let Some(save_data) = &state.selected_save_data {
+                            let max_lines = 10;
+                            let total_lines = save_data.history.len();
+                            let max_scroll = total_lines.saturating_sub(max_lines);
+                            if state.dialogue_scroll_offset < max_scroll {
+                                state.dialogue_scroll_offset += 1;
+                            }
+                        }
+                    } else {
+                        let save_data = match &state.selected_save_data {
+                            Some(data) => data,
+                            None => return,
+                        };
+                        
+                        let max_items = match state.selected_column {
+                            ColumnType::Stats => save_data.stats.iter()
+                                .filter(|(_, stat)| matches!(stat, Stat::Numeric(_)))
+                                .count(),
+                            ColumnType::Tags => save_data.stats.iter()
+                                .filter(|(_, stat)| matches!(stat, Stat::Tag))
+                                .count(),
+                            ColumnType::Inventory => save_data.inventory.len(),
+                            ColumnType::Dialogue => 0,
+                        };
+                        
+                        let visible_rows = 10;
+                        let max_scroll = max_items.saturating_sub(visible_rows);
+                        if state.scroll_offset < max_scroll {
+                            state.scroll_offset += 1;
+                        }
                     }
-                }
+                },
                 KeyCode::Tab => {
                     state.selected_column = match state.selected_column {
                         ColumnType::Stats => ColumnType::Tags,
                         ColumnType::Tags => ColumnType::Inventory,
-                        ColumnType::Inventory => ColumnType::Stats,
+                        ColumnType::Inventory => ColumnType::Dialogue,
+                        ColumnType::Dialogue => ColumnType::Stats,
                     };
                     state.scroll_offset = 0;
-                }
+                    state.dialogue_scroll_offset = 0;
+                },
                 KeyCode::Char('q') if event.modifiers.contains(KeyModifiers::CONTROL) => {
                     self.route = Route::MainMenu;
-                }
-                _ => {}
+                },
+                _ => {},
             }
         }
-        
     }
 }

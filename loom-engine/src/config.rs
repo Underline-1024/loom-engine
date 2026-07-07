@@ -38,6 +38,7 @@ pub struct LlmConfig {
     pub system_prompt: String,
     #[serde(default)]
     pub max_tokens: Option<u64>,
+    pub max_turns: usize,
 }
 impl LlmConfig {
     pub fn load() -> Result<Self> {

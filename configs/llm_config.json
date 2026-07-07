@@ -3,5 +3,6 @@
     "enable_dynamic": false,
     "model": "glm-4.5-air",
     "system_prompt": "You are an AI narrator in a text-based RPG game. You communicate with players and can invoke tools to perform operations.",
-    "max_tokens": 1024
+    "max_tokens": 1024,
+    "max_turns": 10
 }

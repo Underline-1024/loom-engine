@@ -38,6 +38,7 @@ where
 {
     let config = LlmConfig::load()?; 
     let max_tokens_opt = config.max_tokens;
+    let max_turns = config.max_turns;
 
     // 直接使用 AgentBuilder
     let mut agent_builder = AgentBuilder::new(client.completion_model(model));
@@ -50,6 +51,7 @@ where
     // 添加 preamble 和 tools，然后 build
     let agent = agent_builder
         .preamble(preamble)
+        .default_max_turns(max_turns)
         .tools(get_tools())
         .build();
 
@@ -84,6 +86,7 @@ where
     // 读取配置
     let config = LlmConfig::load()?; 
     let max_tokens_opt = config.max_tokens;
+    let max_turns = config.max_turns;
 
     // 创建 ToolSet
     let toolset = ToolSet::from_tools_boxed(get_tools());
@@ -114,6 +117,7 @@ where
     let mut agent_builder = client
         .agent(model)
         .preamble(preamble)
+        .default_max_turns(max_turns)
         .tools(get_tools())
         .dynamic_tools(dynamic_tool_count, index, toolset);
     
