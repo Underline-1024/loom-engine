@@ -1,6 +1,7 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
-use rig::agent::Agent;
+use rig::{agent::Agent, completion::Document};
 use rig::client::ProviderClient;
 use rig::completion::Prompt;
 use anyhow::{Result, Context};
@@ -180,6 +181,8 @@ impl Narrator {
 #[async_trait]
 pub trait DynAgent: Send + Sync {
     async fn chat(&self, prompt: &str) -> Result<String>;
+    async fn add_context(&mut self, doc: &str);
+    async fn clear_context(&mut self);
 }
 #[async_trait]
 impl<T> DynAgent for Agent<T>
@@ -188,5 +191,17 @@ where
 {
     async fn chat(&self, prompt: &str) -> Result<String> {
         self.prompt(prompt).await.map_err(|e| e.into())
+    }
+
+    async fn add_context(&mut self, doc: &str) {
+        self.static_context.push(Document {
+            id: format!("static_doc_{}", self.static_context.len()),
+            text: doc.into(),
+            additional_props: HashMap::new(),
+        });
+    }
+
+    async fn clear_context(&mut self) {
+        self.static_context.clear();
     }
 }
