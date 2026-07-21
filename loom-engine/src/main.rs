@@ -4,7 +4,7 @@ use std::sync::OnceLock;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use loom_engine::{llm::Narrator, app::create::CreateState};
-use loom_engine::llm::tool::builtin_tools::init_save_data;
+use loom_engine::llm::tool::builtin_tools::{init_save_data, reset_save_data};
 use loom_engine::config::{GameMode, LlmConfig};
 use ratatui::widgets::ListState;
 use tracing_subscriber::layer::SubscriberExt;

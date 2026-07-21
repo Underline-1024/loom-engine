@@ -2,6 +2,8 @@ use create::CreateState;
 use gameplay::GameplayState;
 use ratatui::{self};
 use ratatui::widgets::ListState;
+use crate::config::GameMode;
+use crate::llm::tool::builtin_tools::{reset_save_data, save_data};
 use crate::save::SaveMeta;
 use crate::project::{list_projects, Project};
 use anyhow::{bail, Error, Result};
@@ -50,6 +52,12 @@ impl App {
         })
     }
     pub fn navigate_to(&mut self, route: Route) {
+        if let Route::Gameplay(GameplayState{ selected_save_data, .. }) = &route {
+            if let Some(save_data) = selected_save_data {
+                reset_save_data(save_data.game_mode.clone());
+            }
+        }
+        
         self.route = route;
     }
     

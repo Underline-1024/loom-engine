@@ -24,7 +24,6 @@ use crate::llm::tool::get_tools;
 /// * `client` - 任何实现了 CompletionClient 的 Rig 客户端
 /// * `model` - 模型名称
 /// * `preamble` - 系统提示
-/// * `tools` - 工具列表
 ///
 /// # 返回
 /// 配置好的 Agent
@@ -68,7 +67,7 @@ where
 /// * `model` - 模型名称（用于对话）
 /// * `embedding_model` - 嵌入模型名称（用于向量检索）
 /// * `preamble` - 系统提示
-/// * `dynamic_tool_count` - 每次检索的工具数量（建议 3-10）
+/// * `tool_retrieval_count` - 每次检索的工具数量（建议 3-10）
 ///
 /// # 返回
 /// 配置好的 Agent
@@ -77,7 +76,7 @@ pub async fn create_rig_agent_with_dynamic_tools<C>(
     model: &str,
     embedding_model: &str,
     preamble: &str,
-    dynamic_tool_count: usize,
+    tool_retrieval_count: usize,
 ) -> Result<rig::agent::Agent<C::CompletionModel>, anyhow::Error>
 where
     C: ProviderClient + CompletionClient + EmbeddingsClient + Clone,
@@ -119,7 +118,7 @@ where
         .preamble(preamble)
         .default_max_turns(max_turns)
         .tools(get_tools())
-        .dynamic_tools(dynamic_tool_count, index, toolset);
+        .dynamic_tools(tool_retrieval_count, index, toolset);
     
     // 🔥 如果配置了 max_tokens，就设置
     if let Some(max_tokens) = max_tokens_opt {
