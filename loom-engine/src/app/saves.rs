@@ -8,8 +8,8 @@ use ratatui::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use chrono::DateTime;
 
-use super::App;
-use crate::app::Route;
+use super::{gameplay::GameplayState, App};
+use crate::{app::Route, llm::{tool::builtin_tools::save_data, Narrator}};
 
 impl App {
     pub fn render_saves(&mut self, frame: &mut Frame, area: Rect) {
@@ -234,7 +234,7 @@ impl App {
         }
     }
 
-    pub fn handle_saves_input(&mut self, key: KeyEvent) {
+    pub async fn handle_saves_input(&mut self, key: KeyEvent, narrator: &mut Narrator) {
         match key.code {
             KeyCode::Up => {
                 if let Route::Saves(state) = &mut self.route {
@@ -298,9 +298,18 @@ impl App {
     
                 if let Some(ts) = timestamp {
                     if let Ok(project) = self.get_mut_project() {
-                        if let Ok(save_data) = project.load_save(ts) {
+                        let project_prompt = project.config().prompt.clone();
+                        let _ = narrator.clear_context().await;
+                        let _ = narrator.add_context(&project_prompt).await;
+                        if let Ok(loaded_save) = project.load_save(ts) {
+                            {
+                                let data = save_data();
+                                let mut guard = data.lock().unwrap();
+                                *guard = loaded_save.clone();
+                            }
+                        
                             self.navigate_to(Route::Gameplay(
-                                crate::app::gameplay::GameplayState::new(save_data),
+                                GameplayState::new(loaded_save),
                             ));
                         }
                     }

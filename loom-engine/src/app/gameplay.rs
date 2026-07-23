@@ -459,21 +459,6 @@ impl App {
                     spans.push(Span::from(content.clone()));
                 }
                 
-                if let Some(actions) = &dialogue.actions {
-                    let action_names: Vec<String> = actions.iter()
-                        .filter_map(|v| {
-                            v.as_object().and_then(|obj| {
-                                obj.get("tool").and_then(|t| t.as_str()).map(|s| s.to_string())
-                            })
-                        })
-                        .collect();
-                    
-                    if !action_names.is_empty() {
-                        let action_str = format!(" [{}]", action_names.join(", "));
-                        spans.push(Span::styled(action_str, Style::default().fg(Color::DarkGray)));
-                    }
-                }
-                
                 Line::from(spans)
             })
             .collect();
@@ -636,37 +621,41 @@ impl App {
         }
     }
 
-    async fn handle_player_input(
-        &mut self,
-        input: &str,
-        narrator: &Narrator,
-    ) {
-        // 设置处理状态
+    async fn handle_player_input(&mut self, input: &str, narrator: &Narrator) {
+        // 1. 在锁内：添加玩家消息到界面，并克隆原始历史
+        let history_clone = {
+            let data = save_data();
+            let guard = data.lock().unwrap();
+            // 添加玩家消息到界面（独立副本）
+            self.add_dialogue("Player", input.to_string());
+            // 克隆当前历史，供 LLM 使用
+            guard.raw_history.clone()
+        }; // 锁释放
+    
+        // 2. 设置 UI 处理状态
         if let Route::Gameplay(state) = &mut self.route {
             state.is_processing = true;
         }
-        
-        // 添加玩家消息到历史
-        self.add_dialogue("Player", input.to_string());
-        
-        // 获取上下文
-        let context = self.build_game_context();
-        
-        // 调用 LLM
-        match narrator.chat(&format!("{}\nPlayer action: {}", context, input)).await {
+    
+        // 3. 调用 LLM（不持有锁）
+        let mut history = history_clone;
+        match narrator.chat(input, &mut history).await {
             Ok(response) => {
-                // 解析并应用 LLM 响应
+                // 4. 写回更新后的历史（短暂加锁）
+                {
+                    let data = save_data();
+                    let mut guard = data.lock().unwrap();
+                    guard.raw_history = history;
+                }
+                // 5. 应用响应（解析并更新界面状态、stats、inventory）
                 self.apply_llm_response(&response).await;
-            },
+            }
             Err(e) => {
-                self.add_dialogue(
-                    "System",
-                    format!("Error: {}", e),
-                );
-            },
+                self.add_dialogue("System", format!("Error: {}", e));
+            }
         }
-        
-        // 清除处理状态
+    
+        // 6. 清除处理状态
         if let Route::Gameplay(state) = &mut self.route {
             state.is_processing = false;
         }
@@ -678,7 +667,6 @@ impl App {
                 save_data.history.push(Dialogue::new(
                     speaker.to_string(),
                     Some(content),
-                    None,
                 ));
                 // 自动滚动到最新消息
                 state.dialogue_scroll_offset = save_data.history.len().saturating_sub(1);
@@ -737,25 +725,6 @@ impl App {
             state.selected_save_data = Some(loaded_data);
             self.add_dialogue("System", "Game loaded successfully!".to_string());
         }
-    }
-
-    fn build_game_context(&self) -> String {
-        let mut context = String::new();
-        
-        if let Route::Gameplay(state) = &self.route {
-            if let Some(save_data) = &state.selected_save_data {
-                context.push_str("Game context:\n");
-                context.push_str(&format!("- Stats: {:?}\n", save_data.stats));
-                context.push_str(&format!("- Inventory: {:?}\n", save_data.inventory));
-                context.push_str(&format!("- History: {} entries\n", save_data.history.len()));
-                
-                if let Some(last) = save_data.history.last() {
-                    context.push_str(&format!("- Last action: {:?}\n", last));
-                }
-            }
-        }
-        
-        context
     }
 
     async fn apply_llm_response(&mut self, response: &str) {

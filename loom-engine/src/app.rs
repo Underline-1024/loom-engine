@@ -52,11 +52,11 @@ impl App {
         })
     }
     pub fn navigate_to(&mut self, route: Route) {
-        if let Route::Gameplay(GameplayState{ selected_save_data, .. }) = &route {
-            if let Some(save_data) = selected_save_data {
-                reset_save_data(save_data.game_mode.clone());
-            }
-        }
+        // if let Route::Gameplay(GameplayState{ selected_save_data, .. }) = &route {
+        //     if let Some(save_data) = selected_save_data {
+        //         reset_save_data(save_data.game_mode.clone());
+        //     }
+        // }
         
         self.route = route;
     }

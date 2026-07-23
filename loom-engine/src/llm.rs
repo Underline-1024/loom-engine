@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
+use rig::message::Message;
 use rig::{agent::Agent, completion::Document};
 use rig::client::ProviderClient;
 use rig::completion::Prompt;
@@ -168,19 +169,46 @@ impl Narrator {
         Ok(())
     }
 
-    pub async fn chat(&self, prompt: &str) -> Result<String> {
+    pub async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
         let guard = self.agent.lock().await;
         let agent = guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Narrator not initialized. Call init() first."))?;
 
-        agent.chat(prompt).await
+        agent.chat(prompt, history).await
+    }
+
+    pub async fn add_context(&self, doc: &str) -> Result<()> {
+        let mut guard = self.agent.lock().await;
+        let agent_arc = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Narrator not initialized"))?;
+
+        // 尝试获取 Arc 的唯一可变引用
+        let agent = Arc::get_mut(agent_arc)
+            .ok_or_else(|| anyhow::anyhow!("Agent is currently shared; cannot mutate. Ensure no other clones exist."))?;
+
+        agent.add_context(doc).await;
+        Ok(())
+    }
+
+    pub async fn clear_context(&self) -> Result<()> {
+        let mut guard = self.agent.lock().await;
+        let agent_arc = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Narrator not initialized"))?;
+
+        let agent = Arc::get_mut(agent_arc)
+            .ok_or_else(|| anyhow::anyhow!("Agent is currently shared; cannot mutate. Ensure no other clones exist."))?;
+
+        agent.clear_context().await;
+        Ok(())
     }
 }
 
 #[async_trait]
 pub trait DynAgent: Send + Sync {
-    async fn chat(&self, prompt: &str) -> Result<String>;
+    async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String>;
     async fn add_context(&mut self, doc: &str);
     async fn clear_context(&mut self);
 }
@@ -189,8 +217,8 @@ impl<T> DynAgent for Agent<T>
 where
     T: rig::completion::CompletionModel + Send + Sync,
 {
-    async fn chat(&self, prompt: &str) -> Result<String> {
-        self.prompt(prompt).await.map_err(|e| e.into())
+    async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
+        self.prompt(prompt).with_history(history).await.map_err(|e| e.into())
     }
 
     async fn add_context(&mut self, doc: &str) {

@@ -62,7 +62,7 @@ async fn main() -> Result<()> {
     init_logging();
     init_save_data(GameMode::default());
     
-    let narrator = Narrator::new();
+    let mut narrator = Narrator::new();
     let dynamic_tool_count = 5;
     let llm_config = LlmConfig::load()?;
     narrator.init(&llm_config, dynamic_tool_count).await?;
@@ -160,7 +160,7 @@ async fn main() -> Result<()> {
                         Route::Help => {},
                         Route::Gameplay(_) => app.handle_gameplay_input(key_code.into(), &narrator).await,
                         Route::Error(_) => {},
-                        Route::Saves(_) => app.handle_saves_input(key_code.into()),
+                        Route::Saves(_) => app.handle_saves_input(key_code.into(), &mut narrator).await,
                     }
                     
                     if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {

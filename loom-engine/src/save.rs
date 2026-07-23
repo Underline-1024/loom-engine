@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use hashbrown::HashMap;
+use rig::message::Message;
 use serde::{Serialize, Deserialize};
 use chrono::Utc;
 use anyhow::Result;
@@ -34,6 +35,7 @@ pub struct SaveData {
     pub stats: HashMap<String, Stat>,
     pub inventory: HashMap<String, u64>,
     pub history: Vec<Dialogue>,
+    pub raw_history: Vec<Message>,
 }
 impl SaveData {
     pub fn new(game_mode: GameMode) -> Self {
@@ -42,6 +44,7 @@ impl SaveData {
             stats: HashMap::new(),
             inventory: HashMap::new(),
             history: Vec::new(),
+            raw_history: Vec::new(),
         }
     }
     pub fn add_item(&mut self, name: &str, amount:u64) -> u64 {

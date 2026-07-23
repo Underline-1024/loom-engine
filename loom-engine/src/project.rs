@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs::{self, rename}, path::PathBuf};
 use anyhow::{bail, Result, Context};
 use crate::{config::{GameMode, WorldConfig}, llm::{tool::builtin_tools::{reset_save_data, save_data}, Narrator}, save::{SaveData, SaveMeta}};
 use chrono::Utc;
@@ -119,6 +119,7 @@ impl Project {
 
         Ok(results)
     }
+    
     pub fn load_save(&self, timestamp: i64) -> Result<SaveData> {
         let path = self.path.join("saves").join(format!("save_{}.json", timestamp));
         let json = fs::read_to_string(&path)?;
@@ -163,8 +164,12 @@ impl Project {
             }
 
             // 更新时间戳和备注
-            meta.timestamp = Utc::now().timestamp_millis();
+            let ts = Utc::now().timestamp_millis();
+            let new_save_path = save_path.parent().unwrap().join(format!("save_{}.json", ts));
+            let new_meta_path = meta_path.parent().unwrap().join(format!("save_{}.meta.json", ts));
+            meta.timestamp = ts;
             meta.note = note;
+            meta.main_filename = new_save_path.file_name().unwrap().to_str().unwrap().into();
 
             // 覆盖写入
             let guard = data.lock().unwrap();
@@ -175,6 +180,9 @@ impl Project {
             let meta_json = serde_json::to_string_pretty(&meta)?;
             fs::write(&meta_path, meta_json)
                 .with_context(|| format!("Failed to write meta file: {:?}", meta_path))?;
+
+            rename(save_path, new_save_path)?;
+            rename(meta_path, new_meta_path)?;
 
             Ok(meta.clone())
         } else {
@@ -187,7 +195,7 @@ impl Project {
             } else if let Some((n, game_mode, prompt)) = narrator_gamemode_prompt {
                 // 创建新存档：初始化世界数据
                 reset_save_data(game_mode);
-                let _ = n.chat(prompt).await;
+                let _ = n.chat(prompt, &mut Vec::new()).await;
             }
             // 如果既没有 meta 也没有 narrator_gamemode_prompt，使用当前全局 save_data
 
