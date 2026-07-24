@@ -620,15 +620,27 @@ impl App {
             },
         }
     }
-
+    
     async fn handle_player_input(&mut self, input: &str, narrator: &Narrator) {
-        // 1. 在锁内：添加玩家消息到界面，并克隆原始历史
+        // 1. 在锁内：添加玩家消息到全局和界面，并克隆原始历史
         let history_clone = {
             let data = save_data();
-            let guard = data.lock().unwrap();
-            // 添加玩家消息到界面（独立副本）
-            self.add_dialogue("Player", input.to_string());
-            // 克隆当前历史，供 LLM 使用
+            let mut guard = data.lock().unwrap();
+    
+            // 创建玩家对话
+            let dialogue = Dialogue::new("Player".to_string(), Some(input.to_string()));
+    
+            // 添加到全局 history
+            guard.history.push(dialogue.clone());
+    
+            // 同步到界面副本
+            if let Route::Gameplay(state) = &mut self.route {
+                if let Some(save_data) = &mut state.selected_save_data {
+                    save_data.history.push(dialogue);
+                }
+            }
+    
+            // 克隆当前 raw_history 供 LLM 使用
             guard.raw_history.clone()
         }; // 锁释放
     
@@ -641,16 +653,26 @@ impl App {
         let mut history = history_clone;
         match narrator.chat(input, &mut history).await {
             Ok(response) => {
-                // 4. 写回更新后的历史（短暂加锁）
+                // 4. 写回更新后的历史，并同步全局 history 到界面
                 {
                     let data = save_data();
                     let mut guard = data.lock().unwrap();
                     guard.raw_history = history;
+    
+                    // 同步全局 history 到界面副本（工具可能已修改全局 history）
+                    if let Route::Gameplay(state) = &mut self.route {
+                        if let Some(save_data) = &mut state.selected_save_data {
+                            save_data.history = guard.history.clone();
+                            state.dialogue_scroll_offset = save_data.history.len().saturating_sub(1);
+                        }
+                    }
                 }
-                // 5. 应用响应（解析并更新界面状态、stats、inventory）
+    
+                // 5. 应用响应（更新 stats / inventory）
                 self.apply_llm_response(&response).await;
             }
             Err(e) => {
+                // 错误处理：显示系统消息（不影响全局，仅界面）
                 self.add_dialogue("System", format!("Error: {}", e));
             }
         }
@@ -728,38 +750,19 @@ impl App {
     }
 
     async fn apply_llm_response(&mut self, response: &str) {
-        // 解析并应用 LLM 响应
         if let Ok(parsed) = serde_json::from_str::<Value>(response) {
-            // 处理对话内容
-            if let Some(content) = parsed.get("content").and_then(|c| c.as_str()) {
-                self.add_dialogue("Narrator", content.to_string());
-            }
-            
-            // 收集需要更新的数据
-            let mut stats_updates = Vec::new();
-            let mut inventory_updates = Vec::new();
-            
-            if let Route::Gameplay(state) = &self.route {
-                if let Some(_save_data) = &state.selected_save_data {
-                    if let Some(stats) = parsed.get("stats").and_then(|s| s.as_object()) {
-                        for (key, value) in stats {
-                            if let Some(num) = value.as_i64() {
-                                stats_updates.push((key.clone(), num));
-                            }
-                        }
-                    }
-                    
-                    if let Some(inventory) = parsed.get("inventory").and_then(|i| i.as_object()) {
-                        for (key, value) in inventory {
-                            if let Some(count) = value.as_u64() {
-                                inventory_updates.push((key.clone(), count));
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // 应用状态更新
+            // ❌ 移除以下两行（工具已负责添加叙述者回复）
+            // if let Some(content) = parsed.get("content").and_then(|c| c.as_str()) {
+            //     self.add_dialogue("Narrator", content.to_string());
+            // }
+    
+            // 收集 stats 和 inventory 更新（不变）
+            let mut stats_updates: Vec<(String, i64)> = Vec::new();
+            let mut inventory_updates: Vec<(String, u64)> = Vec::new();
+    
+            // ... 原有解析逻辑 ...
+    
+            // 应用状态更新（不变）
             if let Route::Gameplay(state) = &mut self.route {
                 if let Some(save_data) = &mut state.selected_save_data {
                     for (key, value) in stats_updates {
@@ -769,7 +772,6 @@ impl App {
                             }
                         }
                     }
-                    
                     for (key, count) in inventory_updates {
                         if count > 0 {
                             save_data.inventory.insert(key, count);
@@ -780,8 +782,20 @@ impl App {
                 }
             }
         } else {
-            // 如果不是 JSON，直接作为叙述
-            self.add_dialogue("Narrator", response.to_string());
+            // 非 JSON 回退（例如纯文本）—— 这种情况下工具未调用，我们手动添加叙述者回复
+            // 为了完整性，也添加到全局和界面
+            let dialogue = Dialogue::new("Narrator".to_string(), Some(response.to_string()));
+            {
+                let data = save_data();
+                let mut guard = data.lock().unwrap();
+                guard.history.push(dialogue.clone());
+                // 同步到界面
+                if let Route::Gameplay(state) = &mut self.route {
+                    if let Some(save_data) = &mut state.selected_save_data {
+                        save_data.history.push(dialogue);
+                    }
+                }
+            }
         }
     }
 

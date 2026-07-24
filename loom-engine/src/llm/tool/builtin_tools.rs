@@ -1,6 +1,6 @@
 //! Built-in tools for game state management.
 
-use crate::llm::tool;
+use crate::{llm::tool, story::Dialogue};
 use crate::actor::Stat;
 use crate::config::GameMode;
 use crate::lim::Lim;
@@ -264,6 +264,23 @@ pub fn set_stat_value(
     }
 }
 
+// ============ Dialogue Management Tools ============
+
+/// Add a dialogue entry to the game history.
+#[tool(
+    result_doc = "Added dialogue from {speaker}",
+    param = (speaker, "The speaker name, e.g., 'Player', 'NPC_King', 'Narrator'"),
+    param = (content, "Dialogue content (optional)"),
+    embedding_doc = "Add a dialogue entry to the game history"
+)]
+pub fn add_dialogue(speaker: String, content: Option<String>) -> Result<()> {
+    let data = save_data();
+    let mut guard = data.lock().unwrap();
+    let dialogues = &mut guard.history;
+    dialogues.push(Dialogue::new(speaker, content));
+    Ok(())
+}
+
 // ============ Tool Registration ============
 
 /// Get all built-in tool definitions (for non-Rig usage).
@@ -283,6 +300,7 @@ pub fn all_tools() -> Vec<Value> {
         AddToStat::definition(),
         SubFromStat::definition(),
         SetStatValue::definition(),
+        AddDialogue::definition(),
     ]
     .into_iter()
     .map(|def| serde_json::to_value(def).unwrap_or_default())
