@@ -56,6 +56,9 @@ impl SaveData {
         match self.inventory.get_mut(name) {
             Some(count) if *count >= amount => {
                 *count -= amount;
+                if *count == 0 {
+                    self.inventory.remove(name);
+                }
                 Ok(amount)
             }
             Some(count) => {

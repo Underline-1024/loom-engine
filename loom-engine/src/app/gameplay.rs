@@ -97,6 +97,14 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
 
 impl App {
     pub fn render_gameplay(&mut self, frame: &mut Frame, area: Rect) {
+        // 0. 渲染前同步全局数据到局部 UI 状态
+        if let Route::Gameplay(state) = &mut self.route {
+            let data = save_data();
+            if let Ok(guard) = data.lock() {
+                state.selected_save_data = Some(guard.clone());
+            }
+        }
+
         // 1. 提取并接管状态（解决 Rust 借用冲突的终极技巧）
         let (mut save_data_opt, mut stats_state, mut tags_state, mut inv_state, mut dialogue_scroll, selected_col) = match &mut self.route {
             Route::Gameplay(s) => (
