@@ -197,6 +197,7 @@ impl App {
                     if let Some(Ok(project)) = self.projects.get(selected_index) {
                         let _ = self.select_project(project.timestamp());
                         self.navigate_to(Route::Saves(ListState::default()));
+                        let _ = self.refresh_saves();
                     }
                 }
             }

@@ -431,7 +431,7 @@ impl App {
         }
     }
 
-    fn refresh_saves(&mut self) -> Result<(), anyhow::Error> {
+    pub fn refresh_saves(&mut self) -> Result<(), anyhow::Error> {
         if let Some(project_id) = self.selected_project_id {
             for item in &self.projects {
                 if let Ok(project) = item && project.timestamp() == project_id {
@@ -439,33 +439,38 @@ impl App {
                     
                     if let Route::Saves(state) = &mut self.route {
                         if let Some(metas) = &self.current_save_metas {
-                            if let Some(selected_id) = self.selected_save_meta_id {
-                                let mut found = false;
-                                for (idx, meta_result) in metas.iter().enumerate() {
-                                    if let Ok(meta) = meta_result {
-                                        if meta.timestamp == selected_id {
-                                            state.select(Some(idx));
-                                            found = true;
-                                            break;
+                            if !metas.is_empty() {
+                                let mut target_idx = 0;
+                                let mut found_previous = false;
+
+                                // 1. 尝试恢复之前选中的存档 (selected_save_meta_id)
+                                if let Some(selected_id) = self.selected_save_meta_id {
+                                    for (idx, meta_result) in metas.iter().enumerate() {
+                                        if let Ok(meta) = meta_result {
+                                            if meta.timestamp == selected_id {
+                                                target_idx = idx;
+                                                found_previous = true;
+                                                break;
+                                            }
                                         }
                                     }
-                                }
-                                if !found {
-                                    self.selected_save_meta_id = None;
-                                    if !metas.is_empty() {
-                                        state.select(Some(0));
-                                        if let Some(Ok(meta)) = metas.get(0) {
-                                            let _ = self.select_save(meta.timestamp);
-                                        }
-                                    } else {
-                                        state.select(None);
+                                    // 如果之前选中的存档已经被删除了，清空记录
+                                    if !found_previous {
+                                        self.selected_save_meta_id = None;
                                     }
                                 }
-                            } else if !metas.is_empty() && state.selected().is_none() {
-                                state.select(Some(0));
-                                if let Some(Ok(meta)) = metas.get(0) {
+
+                                // 2. 执行选中操作
+                                // 这里去掉了原先 `state.selected().is_none()` 的限制。
+                                // 这样无论是首次进入，还是复用旧的 ListState，都能强制刷新并同步内部状态。
+                                state.select(Some(target_idx));
+                                if let Some(Ok(meta)) = metas.get(target_idx) {
                                     let _ = self.select_save(meta.timestamp);
                                 }
+                            } else {
+                                // 列表为空时清空选中状态
+                                state.select(None);
+                                self.selected_save_meta_id = None;
                             }
                         }
                     }
