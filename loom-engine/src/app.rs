@@ -1,4 +1,5 @@
 use create::CreateState;
+use crossterm::event::KeyEvent;
 use gameplay::GameplayState;
 use ratatui::{self};
 use ratatui::widgets::ListState;
@@ -28,6 +29,15 @@ pub enum Route {
     Error(Error),
     Saves(ListState),
 }
+
+#[derive(Debug)]
+pub enum AppEvent {
+    Key(KeyEvent),
+    Resize,
+    LlmResponse(String), // 🌟 用于接收后台 LLM 的回复
+    LlmError(String),    // 🌟 用于接收错误
+}
+
 pub struct App {
     pub route: Route,
     projects: Vec<Result<Project>>,

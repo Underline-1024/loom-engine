@@ -1,8 +1,9 @@
 //! LLM-driven RPG engine - main entry point.
+use std::io::stdout;
 use std::sync::OnceLock;
-
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::execute;
 use loom_engine::app::settings::SettingsState;
 use loom_engine::{llm::Narrator, app::create::CreateState};
 use loom_engine::llm::tool::builtin_tools::{init_save_data, reset_save_data};
@@ -11,8 +12,9 @@ use ratatui::widgets::ListState;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
-use loom_engine::app::{App, Route};
+use loom_engine::app::{App, AppEvent, Route};
 use tracing_appender;
+use std::sync::Arc;
 
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
@@ -57,17 +59,20 @@ fn init_logging() {
 #[tokio::main]
 async fn main() -> Result<()> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    // ✅ Channel 类型已改为 KeyEvent
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<KeyEvent>(); 
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
     let key_tx = tx.clone();
 
     init_logging();
     init_save_data(GameMode::default());
     
-    let mut narrator = Narrator::new();
+    // 1. 正常创建和初始化 Narrator
+    let mut narrator_instance = Narrator::new();
     let dynamic_tool_count = 5;
     let llm_config = LlmConfig::load()?;
-    narrator.init(&llm_config, dynamic_tool_count).await?;
+    narrator_instance.init(&llm_config, dynamic_tool_count).await?;
+    
+    // 🌟 2. 将初始化好的 narrator 包装进 Arc 中
+    let narrator = Arc::new(narrator_instance);
 
     tokio::spawn(async move {
         loop {
@@ -80,13 +85,11 @@ async fn main() -> Result<()> {
                         match event {
                             Event::Key(key) => {
                                 if key.kind == KeyEventKind::Press {
-                                    let _ = key_tx.send(key);
+                                    let _ = key_tx.send(AppEvent::Key(key));
                                 }
                             },
                             Event::Resize(_, _) => {
-                                // ✅ 发送一个特殊的 Null KeyEvent 作为 Resize 标记
-                                let null_key = KeyEvent::new(KeyCode::Null, KeyModifiers::NONE);
-                                let _ = key_tx.send(null_key);
+                                let _ = key_tx.send(AppEvent::Resize);
                             },
                             _ => {},
                         }
@@ -98,7 +101,8 @@ async fn main() -> Result<()> {
     
     if let Ok(mut app) = App::new() {
         let mut terminal = ratatui::init();
-        
+        execute!(stdout(), EnableMouseCapture).unwrap();
+
         loop {
             // 绘制
             terminal.draw(|frame| {
@@ -116,57 +120,90 @@ async fn main() -> Result<()> {
             
             // 异步等待按键
             tokio::select! {
-                Some(key_event) = rx.recv() => {
-                    // ✅ 从 KeyEvent 中提取 code 用于基础流程控制
-                    let key_code = key_event.code;
-
-                    if key_code == KeyCode::Null {
-                        continue;
-                    }
-
-                    if key_code == KeyCode::Esc && matches!(app.route, Route::MainMenu) {
-                        drop(shutdown_tx);
-                        break;
-                    }
-                    
-                    // ✅ 处理按键：直接传递 key_event，不再使用 .into()
-                    match app.route {
-                        Route::MainMenu => {
-                            match key_code {
-                                KeyCode::Up | KeyCode::Char('k') => app.previous_menu_item(),
-                                KeyCode::Down | KeyCode::Char('j') => app.next_menu_item(),
-                                KeyCode::Enter => {
-                                    if let Route::MainMenu = app.route {
-                                        match app.menu_state.selected() {
-                                            Some(0) => app.navigate_to(Route::Create(CreateState::default())),
-                                            Some(1) => {
-                                                let mut state = ListState::default();
-                                                state.select(Some(0));
-                                                app.navigate_to(Route::Projects(state));
-                                            },
-                                            Some(2) => app.navigate_to(Route::Settings(SettingsState::default())),
-                                            _ => {},
-                                        }
-                                    }
-                                },
-                                _ => {},
+                Some(event) = rx.recv() => {
+                    match event {
+                        // 1. 窗口大小改变：什么都不做，直接 fall through 到下一次循环触发重绘
+                        AppEvent::Resize => {},
+                        
+                        AppEvent::LlmResponse(response) => {
+                            // 1. 调用 gameplay.rs 中的方法处理 AI 回复（解析 JSON、更新 guard.history 等）
+                            app.handle_llm_response(&response).await;
+                            
+                            // 2. 关闭 Loading 状态，并强制滚动到底部
+                            if let Route::Gameplay(state) = &mut app.route {
+                                state.is_processing = false;
+                                state.dialogue_scroll_offset = usize::MAX; 
                             }
                         },
-                        Route::Create(_) => app.handle_create_input(key_event, &narrator).await,
-                        Route::Projects(_) => app.handle_projects_input(key_event),
-                        Route::Settings(_) => app.handle_settings_input(key_event).await,
-                        Route::Help => {},
-                        Route::Gameplay(_) => app.handle_gameplay_input(key_event, &narrator).await,
-                        Route::Error(_) => {},
-                        Route::Saves(_) => app.handle_saves_input(key_event, &mut narrator).await,
-                    }
-                    
-                    if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {
-                        app.navigate_to(Route::MainMenu);
+                        
+                        AppEvent::LlmError(err) => {
+                            // 发生错误时，显示系统提示并关闭 Loading
+                            app.add_dialogue("System", format!("LLM Error: {}", err));
+                            if let Route::Gameplay(state) = &mut app.route {
+                                state.is_processing = false;
+                            }
+                        },
+                        
+                        // 4. 键盘事件：原有的路由分发逻辑
+                        AppEvent::Key(key_event) => {
+                            let key_code = key_event.code;
+    
+                            // 忽略 Null 键（兼容旧逻辑或特殊标记）
+                            if key_code == KeyCode::Null {
+                                continue;
+                            }
+    
+                            // 主菜单按 Esc 退出应用
+                            if key_code == KeyCode::Esc && matches!(app.route, Route::MainMenu) {
+                                drop(shutdown_tx);
+                                break;
+                            }
+                            
+                            // 路由按键分发
+                            match app.route {
+                                Route::MainMenu => {
+                                    match key_code {
+                                        KeyCode::Up | KeyCode::Char('k') => app.previous_menu_item(),
+                                        KeyCode::Down | KeyCode::Char('j') => app.next_menu_item(),
+                                        KeyCode::Enter => {
+                                            if let Route::MainMenu = app.route {
+                                                match app.menu_state.selected() {
+                                                    Some(0) => app.navigate_to(Route::Create(CreateState::default())),
+                                                    Some(1) => {
+                                                        let mut state = ListState::default();
+                                                        state.select(Some(0));
+                                                        app.navigate_to(Route::Projects(state));
+                                                    },
+                                                    Some(2) => app.navigate_to(Route::Settings(SettingsState::default())),
+                                                    _ => {},
+                                                }
+                                            }
+                                        },
+                                        _ => {},
+                                    }
+                                },
+                                // 🌟 Gameplay 需要传入 tx.clone() 以便 spawn 后台任务
+                                Route::Gameplay(_) => app.handle_gameplay_input(key_event, narrator.clone(), tx.clone()).await,
+                                
+                                Route::Create(_) => app.handle_create_input(key_event, &narrator).await,
+                                Route::Projects(_) => app.handle_projects_input(key_event),
+                                Route::Settings(_) => app.handle_settings_input(key_event).await,
+                                Route::Saves(_) => app.handle_saves_input(key_event, narrator.clone()).await,
+                                Route::Help => {},
+                                Route::Error(_) => {},
+                            }
+                            
+                            // 非主菜单界面按 Esc 返回主菜单
+                            if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {
+                                app.navigate_to(Route::MainMenu);
+                            }
+                        }
                     }
                 },
             }
         }
+        
+        execute!(stdout(), crossterm::event::DisableMouseCapture).unwrap();
         
         // 清理终端
         ratatui::restore();

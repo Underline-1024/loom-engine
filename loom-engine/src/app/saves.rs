@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -234,7 +236,7 @@ impl App {
         }
     }
 
-    pub async fn handle_saves_input(&mut self, key: KeyEvent, narrator: &mut Narrator) {
+    pub async fn handle_saves_input(&mut self, key: KeyEvent, narrator: Arc<Narrator>) {
         match key.code {
             KeyCode::Up => {
                 if let Route::Saves(state) = &mut self.route {

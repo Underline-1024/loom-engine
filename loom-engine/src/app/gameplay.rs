@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -7,12 +9,13 @@ use ratatui::{
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{actor::Stat, llm::Narrator, save::SaveData};
 use crate::story::Dialogue;
 use crate::llm::tool::builtin_tools::save_data;
 
-use super::{App, Route};
+use super::{App, AppEvent, Route};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {
@@ -28,8 +31,8 @@ pub struct GameplayState {
     pub input: String,
     pub is_editing: bool,
     pub selected_column: ColumnType,
-    pub pending_llm_response: Option<String>,
     pub is_processing: bool,
+    pub is_loading: bool,
     
     // 列表状态管理（自动处理高亮与滚动）
     pub stats_state: ListState,
@@ -45,8 +48,8 @@ impl Default for GameplayState {
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
-            pending_llm_response: None,
             is_processing: false,
+            is_loading: false,
             stats_state: ListState::default(),
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
@@ -62,8 +65,8 @@ impl GameplayState {
             input: String::new(),
             is_editing: false,
             selected_column: ColumnType::Stats,
-            pending_llm_response: None,
             is_processing: false,
+            is_loading: false,
             stats_state: ListState::default(),
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
@@ -335,18 +338,7 @@ impl App {
         frame.render_widget(paragraph, area);
     }
 
-    pub async fn handle_gameplay_input(&mut self, event: KeyEvent, narrator: &Narrator) {
-        let pending_response = if let Route::Gameplay(state) = &mut self.route {
-            state.pending_llm_response.take()
-        } else {
-            None
-        };
-        
-        if let Some(response) = pending_response {
-            self.handle_llm_response(&response).await;
-            return;
-        }
-        
+    pub async fn handle_gameplay_input(&mut self, event: KeyEvent, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
         match &mut self.route {
             Route::Gameplay(state) => {
                 // 全局快捷键：无论是否处于编辑模式，始终生效
@@ -361,15 +353,12 @@ impl App {
                         };
                         return;
                     },
-                    KeyCode::Char('q') if event.modifiers.contains(KeyModifiers::CONTROL) => {
-                        self.route = Route::MainMenu;
-                        return;
-                    },
-                    _ => {}
+                    _ => {},
                 }
 
                 if state.is_editing && !state.is_processing {
-                    self.handle_editing_input(event, narrator).await;
+                    // 🌟 传递 tx
+                    self.handle_editing_input(event, narrator, tx).await;
                 } else {
                     self.handle_navigation_input(event);
                 }
@@ -378,7 +367,7 @@ impl App {
         }
     }
 
-    async fn handle_editing_input(&mut self, event: KeyEvent, narrator: &Narrator) {
+    async fn handle_editing_input(&mut self, event: KeyEvent, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
         let (input, should_process) = {
             if let Route::Gameplay(state) = &mut self.route {
                 match event.code {
@@ -399,8 +388,12 @@ impl App {
         };
         
         if should_process && !input.is_empty() {
-            if input.starts_with('/') { self.handle_command(&input).await; } 
-            else { self.handle_player_input(&input, narrator).await; }
+            if input.starts_with('/') { 
+                self.handle_command(&input).await; 
+            } else { 
+                // 🌟 传递 tx
+                self.handle_player_input(&input, narrator, tx).await; 
+            }
         }
     }
 
@@ -414,43 +407,58 @@ impl App {
         }
     }
     
-    async fn handle_player_input(&mut self, input: &str, narrator: &Narrator) {
+    async fn handle_player_input(&mut self, input: &str, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
+        // 1. 同步更新 UI 和全局 history（保持原有逻辑不变）
         let history_clone = {
             let data = save_data();
             let mut guard = data.lock().unwrap();
             let dialogue = Dialogue::new("Player".to_string(), Some(input.to_string()));
             guard.history.push(dialogue.clone());
             if let Route::Gameplay(state) = &mut self.route {
-                if let Some(save_data) = &mut state.selected_save_data { save_data.history.push(dialogue); }
+                if let Some(save_data) = &mut state.selected_save_data {
+                    save_data.history.push(dialogue);
+                }
             }
             guard.raw_history.clone()
-        }; 
+        };
 
-        if let Route::Gameplay(state) = &mut self.route { state.is_processing = true; }
-    
-        let mut history = history_clone;
-        match narrator.chat(input, &mut history).await {
-            Ok(response) => {
-                {
-                    let data = save_data();
-                    let mut guard = data.lock().unwrap();
-                    guard.raw_history = history;
-                    if let Route::Gameplay(state) = &mut self.route {
-                        if let Some(save_data) = &mut state.selected_save_data {
-                            save_data.history = guard.history.clone();
-                            state.dialogue_scroll_offset = usize::MAX; // 触发自动滚动到底部
-                        }
-                    }
-                }
-                self.apply_llm_response(&response).await;
-            }
-            Err(e) => { self.add_dialogue("System", format!("Error: {}", e)); }
+        // 2. 开启 Loading 状态，阻止用户继续发送
+        if let Route::Gameplay(state) = &mut self.route {
+            state.is_processing = true;
         }
-    
-        if let Route::Gameplay(state) = &mut self.route { state.is_processing = false; }
+
+        // 3. 克隆 Arc 和输入字符串，准备移入后台任务
+        let narrator_clone = narrator.clone();
+        let input_clone = input.to_string();
+
+        // 4. 🌟 启动后台任务，彻底解放主线程
+        tokio::spawn(async move {
+            let mut history = history_clone;
+
+            // 在后台执行耗时的 LLM 请求（Arc 拥有 'static 生命周期，安全 await）
+            let result = narrator_clone.chat(&input_clone, &mut history).await;
+
+            // 请求结束后，在后台直接更新全局的 raw_history
+            {
+                let data = save_data();
+                if let Ok(mut guard) = data.lock() {
+                    guard.raw_history = history;
+                }
+            }
+
+            // 5. 通过 Channel 将结果发回主线程
+            match result {
+                Ok(response) => {
+                    let _ = tx.send(AppEvent::LlmResponse(response));
+                }
+                Err(e) => {
+                    let _ = tx.send(AppEvent::LlmError(e.to_string()));
+                }
+            }
+        });
     }
 
-    fn add_dialogue(&mut self, speaker: &str, content: String) {
+    pub fn add_dialogue(&mut self, speaker: &str, content: String) {
         if let Route::Gameplay(state) = &mut self.route {
             if let Some(save_data) = &mut state.selected_save_data {
                 save_data.history.push(Dialogue::new(speaker.to_string(), Some(content)));
@@ -533,7 +541,7 @@ impl App {
         }
     }
 
-    async fn handle_llm_response(&mut self, response: &str) {
+    pub async fn handle_llm_response(&mut self, response: &str) {
         self.apply_llm_response(response).await;
     }
     
