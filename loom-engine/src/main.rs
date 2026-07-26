@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use loom_engine::app::settings::SettingsState;
 use loom_engine::{llm::Narrator, app::create::CreateState};
 use loom_engine::llm::tool::builtin_tools::{init_save_data, reset_save_data};
 use loom_engine::config::{GameMode, LlmConfig};
@@ -112,7 +113,7 @@ async fn main() -> Result<()> {
                     Route::Create(state) => App::render_create_form(frame, state),
                     Route::Gameplay(_) => app.render_gameplay(frame, frame.area()),
                     Route::Projects(_) => app.render_projects_view(frame, frame.area()),
-                    Route::Settings => {},
+                    Route::Settings(_) => app.render_settings_form(frame, frame.area()),
                     Route::Help => {},
                     Route::Error(_) => app.render_error(frame, frame.area()),
                     Route::Saves(_) => app.render_saves(frame, frame.area()),
@@ -146,7 +147,7 @@ async fn main() -> Result<()> {
                                                 state.select(Some(0));
                                                 app.navigate_to(Route::Projects(state));
                                             },
-                                            Some(2) => app.navigate_to(Route::Settings),
+                                            Some(2) => app.navigate_to(Route::Settings(SettingsState::default())),
                                             _ => {},
                                         }
                                     }
@@ -156,7 +157,7 @@ async fn main() -> Result<()> {
                         },
                         Route::Create(_) => app.handle_create_input(key_code.into(), &narrator).await,
                         Route::Projects(_) => app.handle_projects_input(key_code.into()),
-                        Route::Settings => {},
+                        Route::Settings(_) => app.handle_settings_input(key_code.into()).await,
                         Route::Help => {},
                         Route::Gameplay(_) => app.handle_gameplay_input(key_code.into(), &narrator).await,
                         Route::Error(_) => {},

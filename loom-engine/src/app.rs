@@ -2,6 +2,7 @@ use create::CreateState;
 use gameplay::GameplayState;
 use ratatui::{self};
 use ratatui::widgets::ListState;
+use settings::SettingsState;
 use crate::config::GameMode;
 use crate::llm::tool::builtin_tools::{reset_save_data, save_data};
 use crate::save::SaveMeta;
@@ -14,12 +15,13 @@ pub mod projects;
 pub mod gameplay;
 pub mod error;
 pub mod saves;
+pub mod settings;
 
 #[derive(Debug)]
 pub enum Route {
     MainMenu,
     Projects(ListState),
-    Settings,
+    Settings(SettingsState),
     Help,
     Gameplay(GameplayState),
     Create(CreateState),
