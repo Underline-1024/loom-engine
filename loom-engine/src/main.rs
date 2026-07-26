@@ -2,7 +2,7 @@
 use std::sync::OnceLock;
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use loom_engine::app::settings::SettingsState;
 use loom_engine::{llm::Narrator, app::create::CreateState};
 use loom_engine::llm::tool::builtin_tools::{init_save_data, reset_save_data};
@@ -11,7 +11,6 @@ use ratatui::widgets::ListState;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
-use ratatui;
 use loom_engine::app::{App, Route};
 use tracing_appender;
 
@@ -54,10 +53,12 @@ fn init_logging() {
     // 7. 测试日志
     tracing::info!("✅ 日志系统初始化完成，日志保存在 logs/app.log");
 }
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<KeyCode>();
+    // ✅ Channel 类型已改为 KeyEvent
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<KeyEvent>(); 
     let key_tx = tx.clone();
 
     init_logging();
@@ -67,13 +68,6 @@ async fn main() -> Result<()> {
     let dynamic_tool_count = 5;
     let llm_config = LlmConfig::load()?;
     narrator.init(&llm_config, dynamic_tool_count).await?;
-    
-    // let prompt = "请在背包里添加一瓶水。";
-    // let res = narrator.chat(prompt).await?;
-    // println!("{}", res);
-
-    // let data = save_data();
-    // let guard = data.lock().unwrap();
 
     tokio::spawn(async move {
         loop {
@@ -86,23 +80,23 @@ async fn main() -> Result<()> {
                         match event {
                             Event::Key(key) => {
                                 if key.kind == KeyEventKind::Press {
-                                    let _ = key_tx.send(key.code);
+                                    let _ = key_tx.send(key);
                                 }
                             },
                             Event::Resize(_, _) => {
-                                let _ = key_tx.send(KeyCode::Null);
+                                // ✅ 发送一个特殊的 Null KeyEvent 作为 Resize 标记
+                                let null_key = KeyEvent::new(KeyCode::Null, KeyModifiers::NONE);
+                                let _ = key_tx.send(null_key);
                             },
                             _ => {},
                         }
                     }
                 },
             }
-            
         }
     });
     
     if let Ok(mut app) = App::new() {
-        // 手动初始化终端
         let mut terminal = ratatui::init();
         
         loop {
@@ -122,7 +116,10 @@ async fn main() -> Result<()> {
             
             // 异步等待按键
             tokio::select! {
-                Some(key_code) = rx.recv() => {
+                Some(key_event) = rx.recv() => {
+                    // ✅ 从 KeyEvent 中提取 code 用于基础流程控制
+                    let key_code = key_event.code;
+
                     if key_code == KeyCode::Null {
                         continue;
                     }
@@ -132,7 +129,7 @@ async fn main() -> Result<()> {
                         break;
                     }
                     
-                    // 处理按键
+                    // ✅ 处理按键：直接传递 key_event，不再使用 .into()
                     match app.route {
                         Route::MainMenu => {
                             match key_code {
@@ -155,13 +152,13 @@ async fn main() -> Result<()> {
                                 _ => {},
                             }
                         },
-                        Route::Create(_) => app.handle_create_input(key_code.into(), &narrator).await,
-                        Route::Projects(_) => app.handle_projects_input(key_code.into()),
-                        Route::Settings(_) => app.handle_settings_input(key_code.into()).await,
+                        Route::Create(_) => app.handle_create_input(key_event, &narrator).await,
+                        Route::Projects(_) => app.handle_projects_input(key_event),
+                        Route::Settings(_) => app.handle_settings_input(key_event).await,
                         Route::Help => {},
-                        Route::Gameplay(_) => app.handle_gameplay_input(key_code.into(), &narrator).await,
+                        Route::Gameplay(_) => app.handle_gameplay_input(key_event, &narrator).await,
                         Route::Error(_) => {},
-                        Route::Saves(_) => app.handle_saves_input(key_code.into(), &mut narrator).await,
+                        Route::Saves(_) => app.handle_saves_input(key_event, &mut narrator).await,
                     }
                     
                     if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {

@@ -5,6 +5,7 @@ use chrono::Utc;
 
 const PROJECTS_DIR: &str = "projects";
 
+#[derive(Debug, Clone)]
 pub struct Project {
     pub path: PathBuf,
     config: WorldConfig,
@@ -268,6 +269,37 @@ impl Project {
     }
     pub fn timestamp(&self) -> i64 {
         self.timestamp
+    }
+
+    pub fn update_config(&mut self, name: String, mode: GameMode, prompt: String) -> Result<()> {
+        let old_name = self.config.name.clone();
+        
+        // 1. 如果名字改变，需要重命名目录
+        if old_name != name {
+            let old_path = self.path.clone();
+            // 获取父目录 (通常是 "projects") 并拼接新名字
+            let new_path = old_path.parent().unwrap_or(&PathBuf::from(PROJECTS_DIR)).join(&name);
+            
+            if new_path.exists() {
+                bail!("Project '{}' already exists", name);
+            }
+            
+            fs::rename(&old_path, &new_path)
+                .with_context(|| format!("Failed to rename project folder to '{}'", name))?;
+            self.path = new_path;
+        }
+        
+        // 2. 构建新的 config 并保存 (保持原创建时间 timestamp 不变)
+        let new_config = WorldConfig {
+            name,
+            mode,
+            prompt,
+            timestamp: self.config.timestamp, 
+        };
+        
+        self.save_config(new_config)?;
+        
+        Ok(())
     }
 }
 

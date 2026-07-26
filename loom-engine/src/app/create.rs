@@ -26,6 +26,22 @@ pub struct CreateState {
     pub focused_field: CreateField,
     pub name_cursor: usize,
     pub error_msg: Option<String>,
+    pub editing_project: Option<Project>,
+}
+
+impl CreateState {
+    // 🌟 新增：从已有项目创建编辑状态 (预填充数据)
+    pub fn from_project(project: Project) -> Self {
+        let mut state = Self::default();
+        let config = project.config();
+        
+        state.name.insert_str(&config.name);
+        state.mode = config.mode.clone();
+        state.prompt.insert_str(&config.prompt);
+        
+        state.editing_project = Some(project);
+        state
+    }
 }
 
 impl Default for CreateState {
@@ -41,6 +57,7 @@ impl Default for CreateState {
             focused_field: CreateField::Name,
             name_cursor: 0,
             error_msg: None,
+            editing_project: None,
         }
     }
 }
@@ -81,18 +98,32 @@ impl App {
                             return;
                         }
 
+                        let name_text = state.name.lines().join("");
                         let prompt_text = state.prompt.lines().join("\n");
 
-                        match Project::create(state.name.lines().join(""), state.mode.clone(), prompt_text.as_str(), narrator).await {
-                            Ok(project) => {
-                                self.projects.push(Ok(project));
-                                state.error_msg = None;
-                                let mut state = ListState::default();
-                                state.select(Some(0));
-                                self.route = Route::Projects(state);
+                        if let Some(mut old_project) = state.editing_project.clone() {
+                            // 🌟 === 编辑模式：更新项目 ===
+                            match old_project.update_config(name_text, state.mode.clone(), prompt_text) {
+                                Ok(_) => {
+                                    state.error_msg = None;
+                                    let mut list_state = ListState::default();
+                                    list_state.select(Some(0));
+                                    self.route = Route::Projects(list_state);
+                                    let _ = self.refresh_projects(); // 刷新列表以显示新名字/配置
+                                }
+                                Err(e) => state.error_msg = Some(e.to_string()),
                             }
-                            Err(e) => {
-                                state.error_msg = Some(e.to_string());
+                        } else {
+                            // 🌟 === 创建模式：新建项目 (原有逻辑) ===
+                            match Project::create(name_text, state.mode.clone(), prompt_text.as_str(), narrator).await {
+                                Ok(project) => {
+                                    self.projects.push(Ok(project));
+                                    state.error_msg = None;
+                                    let mut list_state = ListState::default();
+                                    list_state.select(Some(0));
+                                    self.route = Route::Projects(list_state);
+                                }
+                                Err(e) => state.error_msg = Some(e.to_string()),
                             }
                         }
                     }
@@ -144,9 +175,16 @@ impl App {
             .split(popup_area);
         
         // 标题
-        let title = Paragraph::new("Create New Project")
+        let title_text = if state.editing_project.is_some() {
+            "Edit Project"
+        } else {
+            "Create New Project"
+        };
+        
+        let title = Paragraph::new(title_text)
             .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
             .alignment(ratatui::layout::Alignment::Center);
+        
         frame.render_widget(title, chunks[0]);
         
         // Name 字段

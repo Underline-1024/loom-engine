@@ -10,7 +10,7 @@ use crate::{app::App, save::SaveData};
 use crate::project::{list_projects, Project};
 use crate::app::Route;
 use crate::config::GameMode;
-use super::gameplay::GameplayState;
+use super::{create::CreateState, gameplay::GameplayState};
 
 impl App {
     pub fn select_project(&mut self, id: i64) -> Result<()> {
@@ -209,12 +209,14 @@ impl App {
             }
             
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                let _ = self.refresh_projects();
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    let _ = self.refresh_projects();
+                }
             }
             
             KeyCode::Char('n') | KeyCode::Char('N') => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    self.navigate_to(Route::Create(crate::app::create::CreateState::default()));
+                    self.navigate_to(Route::Create(CreateState::default()));
                 }
             }
             
@@ -224,6 +226,21 @@ impl App {
                 }
             }
             
+            KeyCode::Char('e') | KeyCode::Char('E') => {
+                let selected_index = if let Route::Projects(state) = &self.route {
+                    state.selected()
+                } else {
+                    None
+                };
+                
+                if let Some(idx) = selected_index {
+                    if let Some(Ok(project)) = self.projects.get(idx) {
+                        let edit_state = CreateState::from_project(project.clone());
+                        self.navigate_to(Route::Create(edit_state));
+                    }
+                }
+            }
+
             _ => {}
         }
     }
@@ -282,7 +299,7 @@ impl App {
         
     }
 
-    fn refresh_projects(&mut self) -> Result<()> {
+    pub fn refresh_projects(&mut self) -> Result<()> {
         self.projects = list_projects()?;
         
         // 单独借用，不影响其他操作

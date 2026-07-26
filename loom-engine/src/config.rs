@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::{Serialize, Deserialize};
 use std::{fs, path::PathBuf};
 use anyhow::Result;
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
 pub struct WorldConfig {
     pub name: String,
     pub mode: GameMode,
