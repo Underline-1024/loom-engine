@@ -36,11 +36,12 @@ pub enum AppEvent {
     Resize,
     LlmResponse(String), // 🌟 用于接收后台 LLM 的回复
     LlmError(String),    // 🌟 用于接收错误
+    ProjectCreated(Result<Project, String>),
 }
 
 pub struct App {
     pub route: Route,
-    projects: Vec<Result<Project>>,
+    pub projects: Vec<Result<Project>>,
     selected_project_id: Option<i64>,
     selected_project_index: usize,
     current_save_metas: Option<Vec<Result<SaveMeta>>>,

@@ -11,7 +11,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use chrono::DateTime;
 
 use super::{gameplay::GameplayState, App};
-use crate::{app::Route, llm::{tool::builtin_tools::save_data, Narrator}};
+use crate::{app::Route, config::GameMode, llm::{tool::builtin_tools::save_data, Narrator}};
 
 impl App {
     pub fn render_saves(&mut self, frame: &mut Frame, area: Rect) {
@@ -301,8 +301,25 @@ impl App {
                 if let Some(ts) = timestamp {
                     if let Ok(project) = self.get_mut_project() {
                         let project_prompt = project.config().prompt.clone();
-                        let _ = narrator.clear_context().await;
-                        let _ = narrator.add_context(&project_prompt).await;
+                        let game_mode = project.config().mode.clone();
+                        // 1. 构建模式规则
+                        let mode_directive = match game_mode {
+                            GameMode::Normal => "The currently active Game Mode is: NORMAL. You MUST execute [PROTOCOL: NORMAL] immediately.",
+                            GameMode::Author => "The currently active Game Mode is: AUTHOR. You MUST execute [PROTOCOL: AUTHOR] immediately.",
+                        };
+                
+                        // 2. 组合世界观与模式指令
+                        let dynamic_rule = format!(
+                            "[WORLD SETTING - ALWAYS ACTIVE]\n{}\n\n[GAME MODE DIRECTIVE - HIGHEST PRIORITY]\n{}", 
+                            project_prompt, 
+                            mode_directive
+                        );
+                
+                        // 3. 更新 preamble
+                        if let Err(e) = narrator.update_preamble(Some(&dynamic_rule)).await {
+                            tracing::error!("Failed to update system prompt: {}", e);
+                        }
+
                         if let Ok(loaded_save) = project.load_save(ts) {
                             {
                                 let data = save_data();

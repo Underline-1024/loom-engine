@@ -143,7 +143,27 @@ async fn main() -> Result<()> {
                                 state.is_processing = false;
                             }
                         },
-                        
+                        AppEvent::ProjectCreated(result) => {
+                            // 确保当前还在 Create 页面
+                            if let Route::Create(state) = &mut app.route {
+                                state.is_processing = false; // 🌟 恢复状态
+                                
+                                match result {
+                                    Ok(project) => {
+                                        // 成功：加入列表并跳转到 Projects 页面
+                                        app.projects.push(Ok(project));
+                                        state.error_msg = None;
+                                        let mut list_state = ListState::default();
+                                        list_state.select(Some(0));
+                                        app.route = Route::Projects(list_state);
+                                    }
+                                    Err(e) => {
+                                        // 失败：显示错误信息，留在当前页面
+                                        state.error_msg = Some(e);
+                                    }
+                                }
+                            }
+                        },
                         // 4. 键盘事件：原有的路由分发逻辑
                         AppEvent::Key(key_event) => {
                             let key_code = key_event.code;
@@ -184,8 +204,7 @@ async fn main() -> Result<()> {
                                 },
                                 // 🌟 Gameplay 需要传入 tx.clone() 以便 spawn 后台任务
                                 Route::Gameplay(_) => app.handle_gameplay_input(key_event, narrator.clone(), tx.clone()).await,
-                                
-                                Route::Create(_) => app.handle_create_input(key_event, &narrator).await,
+                                Route::Create(_) => app.handle_create_input(key_event, narrator.clone(), tx.clone()).await,
                                 Route::Projects(_) => app.handle_projects_input(key_event),
                                 Route::Settings(_) => app.handle_settings_input(key_event).await,
                                 Route::Saves(_) => app.handle_saves_input(key_event, narrator.clone()).await,

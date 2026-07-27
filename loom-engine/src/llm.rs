@@ -66,11 +66,13 @@ macro_rules! provider_match {
 
 pub struct Narrator {
     agent: Mutex<Option<Arc<dyn DynAgent>>>,
+    base_system_prompt: Mutex<String>,
 }
 impl Narrator {
     pub fn new() -> Self {
         Self {
             agent: Mutex::new(None),
+            base_system_prompt: Mutex::new(String::new()),
         }
     }
     async fn create_agent_from_config(
@@ -160,6 +162,9 @@ impl Narrator {
             .await
             .context("Failed to initialize agent")?;
 
+        let mut base_guard = self.base_system_prompt.lock().await;
+        *base_guard = llm_config.system_prompt.clone();
+
         let mut guard = self.agent.lock().await;
         if guard.is_some() {
             return Err(anyhow::anyhow!("Narrator already initialized"));
@@ -204,6 +209,36 @@ impl Narrator {
         agent.clear_context().await;
         Ok(())
     }
+
+    pub async fn update_preamble(&self, dynamic_rule: Option<&str>) -> Result<()> {
+        // 1. 获取缓存的基础提示词
+        let base_prompt = self.base_system_prompt.lock().await.clone();
+        
+        // 2. 智能拼接：如果有动态规则，就追加上去；如果没有，就只用基础提示词
+        let full_preamble = match dynamic_rule {
+            Some(rule) if !rule.is_empty() => {
+                format!(
+                    "{}\n\n[CURRENT SESSION DIRECTIVE - HIGHEST PRIORITY]\n{}", 
+                    base_prompt, rule
+                )
+            }
+            _ => base_prompt,
+        };
+
+        // 3. 获取 Agent 并修改 preamble
+        let mut guard = self.agent.lock().await;
+        let agent_arc = guard
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Narrator not initialized"))?;
+
+        let agent = Arc::get_mut(agent_arc)
+            .ok_or_else(|| anyhow::anyhow!("Agent is currently shared; cannot mutate."))?;
+
+        // 4. 将拼接好的完整提示词设置给 Rig Agent
+        agent.set_preamble(full_preamble).await;
+        
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -211,6 +246,7 @@ pub trait DynAgent: Send + Sync {
     async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String>;
     async fn add_context(&mut self, doc: &str);
     async fn clear_context(&mut self);
+    async fn set_preamble(&mut self, preamble: String);
 }
 #[async_trait]
 impl<T> DynAgent for Agent<T>
@@ -231,5 +267,9 @@ where
 
     async fn clear_context(&mut self) {
         self.static_context.clear();
+    }
+
+    async fn set_preamble(&mut self, preamble: String) {
+        self.preamble = Some(preamble);
     }
 }

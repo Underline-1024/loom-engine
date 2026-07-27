@@ -6,8 +6,11 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use crate::config::GameMode;
 use crate::llm::Narrator;
 use crate::project::Project;
+use crate::app::AppEvent;
 use ratatui_textarea::TextArea;
 use super::{App, Route};
+use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
 #[derive(Debug, Clone, Default)]
 pub enum CreateField {
@@ -27,6 +30,7 @@ pub struct CreateState {
     pub name_cursor: usize,
     pub error_msg: Option<String>,
     pub editing_project: Option<Project>,
+    pub is_processing: bool,                       // 🌟 新增：Loading 状态
 }
 
 impl CreateState {
@@ -58,14 +62,21 @@ impl Default for CreateState {
             name_cursor: 0,
             error_msg: None,
             editing_project: None,
+            is_processing: false,
         }
     }
 }
 
 impl App {
     // 处理创建表单输入
-    pub async fn handle_create_input(&mut self, event: KeyEvent, narrator: &Narrator) {
+    // 🌟 修改签名：接收 Arc<Narrator> 和 tx
+    pub async fn handle_create_input(&mut self, event: KeyEvent, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
         if let Route::Create(ref mut state) = self.route{
+            // 🌟 拦截处理中的按键，防止状态错乱
+            if state.is_processing {
+                return;
+            }
+
             let key = event.code;
         
             // Tab 切换焦点
@@ -100,10 +111,11 @@ impl App {
 
                         let name_text = state.name.lines().join("");
                         let prompt_text = state.prompt.lines().join("\n");
+                        let mode_clone = state.mode.clone();
 
                         if let Some(mut old_project) = state.editing_project.clone() {
-                            // 🌟 === 编辑模式：更新项目 ===
-                            match old_project.update_config(name_text, state.mode.clone(), prompt_text) {
+                            // 🌟 === 编辑模式：更新项目 (同步执行) ===
+                            match old_project.update_config(name_text, mode_clone, prompt_text) {
                                 Ok(_) => {
                                     state.error_msg = None;
                                     let mut list_state = ListState::default();
@@ -114,23 +126,27 @@ impl App {
                                 Err(e) => state.error_msg = Some(e.to_string()),
                             }
                         } else {
-                            // 🌟 === 创建模式：新建项目 (原有逻辑) ===
-                            match Project::create(name_text, state.mode.clone(), prompt_text.as_str(), narrator).await {
-                                Ok(project) => {
-                                    self.projects.push(Ok(project));
-                                    state.error_msg = None;
-                                    let mut list_state = ListState::default();
-                                    list_state.select(Some(0));
-                                    self.route = Route::Projects(list_state);
-                                }
-                                Err(e) => state.error_msg = Some(e.to_string()),
-                            }
+                            // 🌟 === 创建模式：新建项目 (异步执行，防止卡死) ===
+                            state.is_processing = true;
+                            state.error_msg = None;
+
+                            let narrator_clone = narrator.clone();
+                            let tx_clone = tx.clone();
+
+                            tokio::spawn(async move {
+                                let result = Project::create(name_text, mode_clone, prompt_text.as_str(), &narrator_clone).await;
+                                
+                                let event_msg = match result {
+                                    Ok(p) => AppEvent::ProjectCreated(Ok(p)),
+                                    Err(e) => AppEvent::ProjectCreated(Err(e.to_string())),
+                                };
+                                let _ = tx_clone.send(event_msg);
+                            });
                         }
                     }
                 }
             }
         }
-        
     }
 
     // 模式字段输入（左右键切换）
@@ -266,25 +282,33 @@ impl App {
         frame.render_widget(&state.prompt, chunks[3]);
         
         // Confirm 按钮
-        let confirm_text = if let CreateField::Confirm = state.focused_field {
+        let confirm_text = if state.is_processing {
+            "⏳ CREATING & INITIALIZING WORLD..."
+        } else if let CreateField::Confirm = state.focused_field {
             "✓ CONFIRM (Press Enter)"
         } else {
             "✓ CONFIRM"
         };
         
-        let confirm_style = if let CreateField::Confirm = state.focused_field {
+        let confirm_style = if state.is_processing {
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        } else if let CreateField::Confirm = state.focused_field {
             Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Green)
         };
+
+        let confirm_border_style = if state.is_processing {
+            Style::default().fg(Color::Yellow)
+        } else if let CreateField::Confirm = state.focused_field {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default()
+        };
         
         let confirm_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(if let CreateField::Confirm = state.focused_field {
-                Style::default().fg(Color::Green)
-            } else {
-                Style::default()
-            });
+            .border_style(confirm_border_style);
         
         let confirm_paragraph = Paragraph::new(confirm_text)
             .block(confirm_block)

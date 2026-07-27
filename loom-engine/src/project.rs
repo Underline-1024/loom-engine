@@ -196,7 +196,35 @@ impl Project {
             } else if let Some((n, game_mode, prompt)) = narrator_gamemode_prompt {
                 // 创建新存档：初始化世界数据
                 reset_save_data(game_mode);
-                let _ = n.chat(prompt, &mut Vec::new()).await;
+
+                let mut raw_history = Vec::new();
+
+                let init_and_prologue_prompt = format!(
+                    "[WORLD SETTING]\n{}\n\n\
+                    [INITIALIZATION DIRECTIVE]\n\
+                    Establish a global language constraint: ALL subsequent content generated in this session—including item names, stat names, dialogue, and narration—MUST use the exact same language as the world setting provided above.\n\n\
+                    Based on this world setting, generate an immersive opening prologue.\n\n\
+                    CRITICAL TOOL CONSTRAINT: You MUST use the designated dialogue/narration tool to output the prologue. Do NOT return the text as a plain assistant message.\n\n\
+                    Rules:\n\
+                    1. Focus solely on environmental descriptions, atmosphere, and background lore.\n\
+                    2. Do NOT describe any actions, thoughts, or choices of the player character.\n\
+                    3. Do NOT end with a question or a prompt asking for the player's next action.\n\
+                    4. Output ONLY the raw text of the prologue via the tool. Do not include any conversational filler, greetings, meta-text, or premature attribute/item definitions.",
+                    prompt
+                );
+                let _ = n.chat(&init_and_prologue_prompt, &mut raw_history).await;
+
+                let init_stats_prompt = "Now that the scene is set, initialize the player character's starting attributes and inventory based on the world setting and the current situation.\n\n\
+                    CRITICAL TOOL CONSTRAINT: You MUST use the designated stat/inventory modification tools to set these values. Do NOT describe them in plain text or add any narrative.\n\n\
+                    Guidelines:\n\
+                    1. Set core numeric stats with values that feel appropriate for someone who has just awakened in this environment.\n\
+                    2. Add starting items that would logically be found on or near the player given the context of the prologue.\n\
+                    3. Only perform tool calls. Do not output any additional text.";
+                let _ = n.chat(init_stats_prompt, &mut raw_history).await;
+
+                let data = save_data();
+                let mut guard = data.lock().unwrap();
+                guard.raw_history = raw_history;
             }
             // 如果既没有 meta 也没有 narrator_gamemode_prompt，使用当前全局 save_data
 
