@@ -1,7 +1,0 @@
-{
-    "provider": "<your-provider>",
-    "enable_dynamic": false,
-    "model": "<your-model>",
-    "embedding_model": "<your-embedding-model>",
-    "system_prompt": ""
-}
