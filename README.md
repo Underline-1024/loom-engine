@@ -26,7 +26,7 @@
 
 ### 项目配置
 
-1. 从 [Releases 页面]() 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
+1. 从 [Releases 页面](https://github.com/Underline-1024/loom-engine/releases) 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
 
     ![main menu](./assets/main_menu.png)
 

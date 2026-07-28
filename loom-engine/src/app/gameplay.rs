@@ -373,7 +373,7 @@ impl App {
     }
 
     fn render_help_bar(frame: &mut Frame, area: Rect) {
-        let help_text = "Enter:Input | ↑↓:Scroll | ←→:View Long Text | Tab:Switch | Esc:Cancel | Ctrl+Q:Quit";
+        let help_text = "Enter:Input | ↑↓:Scroll | ←→:View Long Text | Tab:Switch | Esc:Back";
         let paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray)).block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Gray)));
         frame.render_widget(paragraph, area);
     }
@@ -418,7 +418,6 @@ impl App {
                             (input, true)
                         } else { (String::new(), false) }
                     },
-                    KeyCode::Esc => { state.is_editing = false; state.input.clear(); (String::new(), false) },
                     KeyCode::Backspace => { state.input.pop(); (String::new(), false) },
                     KeyCode::Char(c) => { state.input.push(c); (String::new(), false) },
                     _ => (String::new(), false),
@@ -505,7 +504,7 @@ impl App {
             "Controls:".to_string(), "  Enter - Start typing".to_string(),
             "  ↑/↓   - Scroll".to_string(), "  ←/→   - View long text".to_string(),
             "  Tab   - Switch columns".to_string(),
-            "  Esc   - Cancel input".to_string(), "  Ctrl+Q - Quit".to_string(),
+            "  Esc   - Back to previous screen".to_string(),
         ].join("\n");
         self.add_dialogue("System", help_text);
     }
