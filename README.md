@@ -1,10 +1,7 @@
-<!-- # Loom Engine
-
-*一个由 LLM 驱动的叙事引擎与文字 RPG。* -->
 <h1 align="center">Loom Engine</h1>
 
 <p align="center">
-  <em>一个由 LLM 驱动的叙事引擎与文字 RPG。</em>
+  <em>An LLM-powered narrative engine and text RPG.</em>
 </p>
 
 <p align="center">
@@ -18,101 +15,105 @@
   <img src="./assets/gameplay.png" alt="gameplay" width="48%">
 </p>
 
-## 目录
+<p align="center">
+  <a href="./README.zh-CN.md">简体中文</a> | <a href="./README.md">English</a>
+</p>
 
--   [快速开始](#快速开始)
-    -   [项目配置](#项目配置)
-    -   [使用流程](#使用流程)
--   [本地开发与源码构建](#️-本地开发与源码构建)
--   [核心特性](#核心特性)
--   [未来规划](#-未来规划)
--   [设置指南](#设置指南)
--   [快捷键](#快捷键)
--   [许可证](#-许可证)
+## Table of Contents
 
-## 快速开始
+-   [Quick Start](#quick-start)
+    -   [Configuration](#configuration)
+    -   [Usage](#usage)
+-   [Local Development & Building from Source](#️-local-development--building-from-source)
+-   [Core Features](#core-features)
+-   [Future Plans](#-future-plans)
+-   [Settings Guide](#settings-guide)
+-   [Keyboard Shortcuts](#keyboard-shortcuts)
+-   [License](#-license)
 
-### 项目配置
+## Quick Start
 
-1. 从 [Releases 页面](https://github.com/Underline-1024/loom-engine/releases) 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
+### Configuration
+
+1.  Download the pre-built binary for your platform from the [Releases page](https://github.com/Underline-1024/loom-engine/releases), extract it, and run the executable to enter the main menu.
 
     ![main menu](./assets/main_menu.png)
 
-2. 进入 Settings 页面，根据自身情况调整 Provider 和 Model 字段，完整设置介绍详见 [设置指南](#设置指南)。
+2.  Navigate to the Settings page and adjust the Provider and Model fields according to your setup. See the [Settings Guide](#settings-guide) for full details.
 
     ![settings](./assets/settings.png)
 
-3. 配置环境变量。需要配置以下两个环境变量（将 `PROVIDER` 替换为实际使用的平台名称，如 `OPENAI`、`ANTHROPIC`）：
-    -   `PROVIDER_BASE_URL`：模型 API 的 Base URL
-    -   `PROVIDER_API_KEY`：对应平台的 API Key
+3.  Configure environment variables. The following two variables are required (replace `PROVIDER` with your actual platform name in uppercase, e.g., `OPENAI`, `ANTHROPIC`):
+    -   `PROVIDER_BASE_URL`: The Base URL of the model API
+    -   `PROVIDER_API_KEY`: Your API key for the corresponding platform
 
-### 使用流程
+### Usage
 
-1. **主菜单**：使用 `↑` `↓` 选择选项，`Enter` 确认。
+1.  **Main Menu**: Use `↑` `↓` to navigate options, `Enter` to confirm.
 
     ![main menu](./assets/main_menu.png)
 
-2. **创建项目**：进入 Create 页面，使用 `Tab` 切换焦点。依次输入项目名称、选择项目模式、填写提示词（世界观设定或系统指令），最后切换至 CONFIRM 按钮并按 `Enter` 确认，等待项目初始化完成。
+2.  **Create Project**: On the Create page, use `Tab` to switch focus. Enter a project name, select a game mode, and fill in the prompt (world-building description or system instructions). Switch to the CONFIRM button and press `Enter` to start initialization.
 
     ![create](./assets/create.png)
 
-3. **选择项目**：项目创建完成后自动跳转至 Projects 页面，使用 `↑` `↓` 选择目标项目，`Enter` 进入。
+3.  **Select Project**: After creation, you will be redirected to the Projects page. Use `↑` `↓` to select a project and `Enter` to enter it.
 
     ![projects](./assets/projects.png)
 
-4. **选择存档**：进入 Saves 页面，选择并加载一个存档。
+4.  **Select Save**: On the Saves page, choose a save file to load.
 
     ![saves](./assets/saves.png)
 
-5. **进入游戏**：进入 Gameplay 页面，界面包含属性面板、背包、对话历史及输入框。使用 `Tab` 切换面板焦点，`↑` `↓` 滚动列表或对话，`←` `→` 查看过长的文本条目；按 `Enter` 激活输入框，输入内容后再次按 `Enter` 发送，等待模型响应。
+5.  **Enter Game**: The Gameplay page includes stat panels, inventory, dialogue history, and an input box. Use `Tab` to switch panel focus, `↑` `↓` to scroll lists or dialogue, and `←` `→` to view truncated text entries. Press `Enter` to activate the input box, type your action, and press `Enter` again to send. Wait for the model to respond.
 
     ![gameplay](./assets/gameplay.png)
 
-## 🛠️ 本地开发与源码构建
+## 🛠️ Local Development & Building from Source
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/Underline-1024/loom-engine.git
 cd loom-engine
 
-# 编译并运行
+# Build and run
 cargo run
 ```
 
-## 核心特性
+## Core Features
 
--   **完整的数值系统与工具链**：内置数值属性、标签属性及背包系统，LLM 可通过全套工具函数实时读写游戏状态，而非仅生成文本。
--   **自然语言驱动交互**：玩家通过自然语言输入任意行动指令，LLM 自动解析意图、推进剧情走向，并同步更新底层数值与物品状态。
--   **广泛的模型兼容性**：原生支持 OpenAI、Anthropic、Ollama，以及任何兼容 OpenAI / Anthropic API 标准的本地或第三方模型平台。
+-   **Complete Stat System & Toolchain**: Built-in numeric stats, tag-based traits, and inventory system. The LLM can read and write game state in real time via a full suite of tool functions, rather than merely generating text.
+-   **Natural Language Driven Interaction**: Players input arbitrary actions in natural language. The LLM automatically parses intent, advances the narrative, and synchronizes underlying stats and inventory state.
+-   **Broad Model Compatibility**: Natively supports OpenAI, Anthropic, Ollama, and any local or third-party platform compatible with the OpenAI / Anthropic API standard.
 
-## 🔮 未来规划
+## 🔮 Future Plans
 
-- [ ] 支持流式输出
-- [ ] 支持插件扩展
-- [ ] 引入本地向量数据库
+-   [ ] Streaming output support
+-   [ ] Plugin extension system
+-   [ ] Local vector database integration
 
-## 设置指南
+## Settings Guide
 
-| 字段 | 说明 |
+| Field | Description |
 | :--- | :--- |
-| **Provider** | 模型平台，使用全小写 |
-| **Enable Dynamic** | 是否启用动态特性，如启用则必须填写 `Embedding Model` 字段，启用则会开启动态工具调用，不启用则使用静态工具调用（某些平台不支持启用动态特性，当遇到不支持的平台时会自动忽略该字段） |
-| **Model** | 模型名称 |
-| **Embedding Model** | 嵌入模型名称，仅当启用动态特性时有效 |
-| **Max Tokens** | 单次响应的最大 Token 限制 |
-| **Max Turns** | 模型一次回答中的最大交互轮数（注意，不是最大对话轮数） |
-| **System Prompt** | 全局系统指令 |
+| **Provider** | Model platform identifier, must be lowercase |
+| **Enable Dynamic** | Toggle dynamic features. When enabled, dynamic tool calling is activated and the `Embedding Model` field becomes required. When disabled, static tool calling is used. This field is automatically ignored on platforms that do not support dynamic features. |
+| **Model** | Name of the core narrative and reasoning model |
+| **Embedding Model** | Name of the embedding model, only effective when dynamic features are enabled |
+| **Max Tokens** | Maximum token limit per single response |
+| **Max Turns** | Maximum interaction turns within a single model response (note: this refers to tool-calling/reasoning loops per response, NOT conversation history turns) |
+| **System Prompt** | Global system instructions |
 
-## 快捷键
+## Keyboard Shortcuts
 
-| 快捷键 | 功能 | 作用范围 |
+| Shortcut | Function | Scope |
 | :--- | :--- | :--- |
-| `Enter` | 确认选择 / 激活输入框 / 发送指令 | 全局 |
-| `↑` / `↓` | 上下滚动列表或对话历史 | 列表与对话面板 |
-| `←` / `→` | 水平滚动查看过长的文本条目 | 当前高亮选中的列表项 |
-| `Tab` | 切换面板焦点 (Stats / Tags / Inventory / Dialogue) | Gameplay 页面 |
-| `Esc` | 返回上一级页面 / 退出程序 (在主菜单时) | 全局 |
+| `Enter` | Confirm selection / Activate input box / Send command | Global |
+| `↑` / `↓` | Scroll lists or dialogue history | List & Dialogue panels |
+| `←` / `→` | Horizontally scroll truncated text entries | Currently highlighted list item |
+| `Tab` | Switch panel focus (Stats / Tags / Inventory / Dialogue) | Gameplay page |
+| `Esc` | Return to previous screen / Exit application (on main menu) | Global |
 
-## 📄 许可证
+## 📄 License
 
-本项目基于 MIT 许可证开源 - 详见 [LICENSE](./LICENSE) 文件。
+This project is open-sourced under the MIT License - see the [LICENSE](./LICENSE) file for details.
