@@ -14,11 +14,7 @@ const TITLE: &str = r#"
 "#;
 
 const JOKES: &[&str] = &[
-    "Why do programmers prefer dark mode? Because light attracts bugs.",
-    "I told my wife she was drawing her eyebrows too high. She looked surprised.",
-    "There are only 10 types of people in the world: those who understand binary, and those who don't.",
-    "Why did the Loom Engine cross the road? To weave the other side!",
-    "Rust: Borrow checker says 'No', but your heart says 'Yes'.",
+    "todo!(\"There should have been some jokes here.\");",
 ];
 
 pub fn get_random_joke() -> &'static str {
@@ -109,8 +105,7 @@ impl App {
         
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(" Main Menu "))
-            .highlight_style(Style::default().bg(Color::DarkGray))
-            .highlight_symbol(">> ");
+            .highlight_style(Style::default().bg(Color::DarkGray));
         
         // ✅ 修复：使用 chunks[1]（菜单区域）
         frame.render_stateful_widget(list, chunks[1], &mut self.menu_state);

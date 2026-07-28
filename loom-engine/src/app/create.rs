@@ -7,7 +7,7 @@ use crate::config::GameMode;
 use crate::llm::Narrator;
 use crate::project::Project;
 use crate::app::AppEvent;
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{TextArea, WrapMode};
 use super::{App, Route};
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
@@ -54,6 +54,7 @@ impl Default for CreateState {
 
         let mut prompt = TextArea::default();
         prompt.set_line_number_style(Style::new().dark_gray());
+        prompt.set_wrap_mode(WrapMode::WordOrGlyph);
         Self {
             name,
             mode: GameMode::Normal,

@@ -79,8 +79,7 @@ impl App {
                 .border_style(Style::default().fg(Color::Cyan)))
             .highlight_style(Style::default()
                 .bg(Color::LightGreen)
-                .add_modifier(Modifier::BOLD))
-            .highlight_symbol("▶ ");
+                .add_modifier(Modifier::BOLD));
 
         if let Route::Projects(state) = &mut self.route {
             frame.render_stateful_widget(project_list, area, state);

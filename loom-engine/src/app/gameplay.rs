@@ -39,6 +39,7 @@ pub struct GameplayState {
     pub tags_state: ListState,
     pub inventory_state: ListState,
     pub dialogue_scroll_offset: usize,
+    pub list_scroll_offset: usize, // 🌟 新增：列表水平滚动偏移量
 }
 
 impl Default for GameplayState {
@@ -53,7 +54,8 @@ impl Default for GameplayState {
             stats_state: ListState::default(),
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
-            dialogue_scroll_offset: usize::MAX, // 改这里：默认滚动到底部
+            dialogue_scroll_offset: usize::MAX, 
+            list_scroll_offset: 0, // 🌟 初始化
         }
     }
 }
@@ -70,7 +72,8 @@ impl GameplayState {
             stats_state: ListState::default(),
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
-            dialogue_scroll_offset: usize::MAX, // 改这里：默认滚动到底部
+            dialogue_scroll_offset: usize::MAX, 
+            list_scroll_offset: 0, // 🌟 初始化
         }
     }
 }
@@ -80,10 +83,9 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current_line = String::new();
     let mut current_width = 0;
-    let max_width = max_width.max(1); // 防止终端极窄导致死循环
+    let max_width = max_width.max(1); 
     
     for c in text.chars() {
-        // 粗略计算宽度：ASCII 算 1，中文/全角算 2
         let c_width = if c.is_ascii() { 1 } else { 2 };
         if current_width + c_width > max_width {
             lines.push(current_line);
@@ -98,6 +100,28 @@ fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
     lines
 }
 
+// 🌟 辅助函数：处理列表项文本的水平滚动与截断
+fn process_list_item_text(full_text: &str, max_width: usize, is_highlighted: bool, scroll_offset: &mut usize) -> String {
+    let char_count = full_text.chars().count();
+    if char_count <= max_width {
+        if is_highlighted {
+            *scroll_offset = 0; // 文本够短，无需滚动，重置偏移量
+        }
+        return full_text.to_string();
+    }
+    
+    if is_highlighted {
+        let max_scroll = char_count.saturating_sub(max_width);
+        if *scroll_offset > max_scroll {
+            *scroll_offset = max_scroll; // 🌟 限制最大滚动量，防止无效按键堆积
+        }
+        full_text.chars().skip(*scroll_offset).take(max_width).collect()
+    } else {
+        // 未选中的项，始终从行首开始截断（保持行首对齐）
+        full_text.chars().take(max_width).collect()
+    }
+}
+
 impl App {
     pub fn render_gameplay(&mut self, frame: &mut Frame, area: Rect) {
         // 0. 渲染前同步全局数据到局部 UI 状态
@@ -108,14 +132,15 @@ impl App {
             }
         }
 
-        // 1. 提取并接管状态（解决 Rust 借用冲突的终极技巧）
-        let (mut save_data_opt, mut stats_state, mut tags_state, mut inv_state, mut dialogue_scroll, selected_col) = match &mut self.route {
+        // 1. 提取并接管状态
+        let (mut save_data_opt, mut stats_state, mut tags_state, mut inv_state, mut dialogue_scroll, mut list_scroll_offset, selected_col) = match &mut self.route {
             Route::Gameplay(s) => (
                 s.selected_save_data.take(),
                 std::mem::take(&mut s.stats_state),
                 std::mem::take(&mut s.tags_state),
                 std::mem::take(&mut s.inventory_state),
                 s.dialogue_scroll_offset,
+                s.list_scroll_offset, // 🌟 提取
                 s.selected_column
             ),
             _ => return,
@@ -129,7 +154,6 @@ impl App {
                     .style(Style::default().fg(Color::Yellow))
                     .block(Block::default().borders(Borders::ALL));
                 frame.render_widget(paragraph, area);
-                // 恢复状态
                 if let Route::Gameplay(s) = &mut self.route { s.selected_save_data = save_data_opt; }
                 return;
             }
@@ -160,10 +184,10 @@ impl App {
             .constraints([Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
             .split(top_chunks[0]);
         
-        // 3. 渲染各组件
-        Self::render_numeric_stats(save_data, frame, left_chunks[0], &mut stats_state, selected_col == ColumnType::Stats);
-        Self::render_tag_stats(save_data, frame, left_chunks[1], &mut tags_state, selected_col == ColumnType::Tags);
-        Self::render_inventory(save_data, frame, left_chunks[2], &mut inv_state, selected_col == ColumnType::Inventory);
+        // 3. 渲染各组件 (🌟 传入 &mut list_scroll_offset)
+        Self::render_numeric_stats(save_data, frame, left_chunks[0], &mut stats_state, selected_col == ColumnType::Stats, &mut list_scroll_offset);
+        Self::render_tag_stats(save_data, frame, left_chunks[1], &mut tags_state, selected_col == ColumnType::Tags, &mut list_scroll_offset);
+        Self::render_inventory(save_data, frame, left_chunks[2], &mut inv_state, selected_col == ColumnType::Inventory, &mut list_scroll_offset);
         Self::render_dialogue_history(save_data, frame, top_chunks[1], &mut dialogue_scroll, selected_col == ColumnType::Dialogue);
         
         // 4. 恢复状态并渲染底部
@@ -173,13 +197,14 @@ impl App {
             s.tags_state = tags_state;
             s.inventory_state = inv_state;
             s.dialogue_scroll_offset = dialogue_scroll;
+            s.list_scroll_offset = list_scroll_offset; // 🌟 恢复
             Self::render_input_area(frame, main_chunks[1], s);
         }
         Self::render_help_bar(frame, main_chunks[2]);
     }
 
     fn render_numeric_stats(
-        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool
+        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool, scroll_offset: &mut usize
     ) {
         let stats: Vec<(&String, &Stat)> = save_data.stats.iter().filter(|(_, stat)| matches!(stat, Stat::Numeric(_))).collect();
         let border_style = if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) };
@@ -193,24 +218,29 @@ impl App {
             return;
         }
         
-        let items: Vec<ListItem> = stats.iter().map(|(name, stat)| {
+        let max_width = content_area.width.saturating_sub(1) as usize;
+        let items: Vec<ListItem> = stats.iter().enumerate().map(|(index, (name, stat))| {
             if let Stat::Numeric(lim) = stat {
                 let current = *lim.value(); let max = *lim.max();
                 let percentage = if max > 0 { (current as f64 / max as f64 * 100.0) as u16 } else { 0 };
                 let bar_width = content_area.width.saturating_sub(6).min(30) as usize;
                 let filled = (bar_width as f64 * percentage as f64 / 100.0) as usize;
                 let bar = if bar_width > 0 && percentage > 0 { format!("[{}{}]", "█".repeat(filled), "░".repeat(bar_width - filled)) } else { String::new() };
-                let text = if !bar.is_empty() { format!("{}: {}/{} {}", name, current, max, bar) } else { format!("{}: {}/{}", name, current, max) };
+                let full_text = if !bar.is_empty() { format!("{}: {}/{} {}", name, current, max, bar) } else { format!("{}: {}/{}", name, current, max) };
                 let color = if percentage > 70 { Color::Green } else if percentage > 40 { Color::Yellow } else { Color::Red };
-                ListItem::new(Line::from(vec![Span::styled(text, Style::default().fg(color))]))
+                
+                let is_highlighted = is_selected && list_state.selected() == Some(index);
+                let display_text = process_list_item_text(&full_text, max_width, is_highlighted, scroll_offset);
+                
+                ListItem::new(Line::from(vec![Span::styled(display_text, Style::default().fg(color))]))
             } else { ListItem::new("") }
         }).collect();
         
-        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)).highlight_symbol(">> "), content_area, list_state);
+        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)), content_area, list_state);
     }
 
     fn render_tag_stats(
-        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool
+        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool, scroll_offset: &mut usize
     ) {
         let tags: Vec<(&String, &Stat)> = save_data.stats.iter().filter(|(_, stat)| matches!(stat, Stat::Tag)).collect();
         let border_style = if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) };
@@ -224,12 +254,19 @@ impl App {
             return;
         }
         
-        let items: Vec<ListItem> = tags.iter().map(|(name, _)| ListItem::new(Line::from(vec![Span::styled(format!("• {}", name), Style::default().fg(Color::Cyan))]))).collect();
-        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)).highlight_symbol(">> "), content_area, list_state);
+        let max_width = content_area.width.saturating_sub(1) as usize;
+        let items: Vec<ListItem> = tags.iter().enumerate().map(|(index, (name, _))| {
+            let full_text = format!("• {}", name);
+            let is_highlighted = is_selected && list_state.selected() == Some(index);
+            let display_text = process_list_item_text(&full_text, max_width, is_highlighted, scroll_offset);
+            ListItem::new(Line::from(vec![Span::styled(display_text, Style::default().fg(Color::Cyan))]))
+        }).collect();
+        
+        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)), content_area, list_state);
     }
 
     fn render_inventory(
-        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool
+        save_data: &SaveData, frame: &mut Frame, area: Rect, list_state: &mut ListState, is_selected: bool, scroll_offset: &mut usize
     ) {
         let inventory: Vec<(&String, &u64)> = save_data.inventory.iter().collect();
         let border_style = if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) };
@@ -243,11 +280,15 @@ impl App {
             return;
         }
         
-        let items: Vec<ListItem> = inventory.iter().map(|(name, count)| {
-            let text = if **count > 1 { format!("{} ×{}", name, count) } else { name.to_string() };
-            ListItem::new(Line::from(vec![Span::styled(text, Style::default().fg(Color::Yellow))]))
+        let max_width = content_area.width.saturating_sub(1) as usize;
+        let items: Vec<ListItem> = inventory.iter().enumerate().map(|(index, (name, count))| {
+            let full_text = if **count > 1 { format!("{} ×{}", name, count) } else { name.to_string() };
+            let is_highlighted = is_selected && list_state.selected() == Some(index);
+            let display_text = process_list_item_text(&full_text, max_width, is_highlighted, scroll_offset);
+            ListItem::new(Line::from(vec![Span::styled(display_text, Style::default().fg(Color::Yellow))]))
         }).collect();
-        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)).highlight_symbol(">> "), content_area, list_state);
+        
+        frame.render_stateful_widget(List::new(items).highlight_style(Style::default().add_modifier(Modifier::BOLD).fg(Color::Yellow)), content_area, list_state);
     }
 
     fn render_dialogue_history(
@@ -296,14 +337,13 @@ impl App {
                     ]));
                 } else {
                     all_lines.push(Line::from(vec![
-                        Span::raw(indent_str.clone()), // 修复生命周期问题：将借用改为克隆
+                        Span::raw(indent_str.clone()), 
                         Span::styled(line_str.clone(), Style::default().fg(Color::White))
                     ]));
                 }
             }
         }
         
-        // 动态计算最大滚动偏移量（彻底解决底部留白问题）
         let max_scroll = all_lines.len().saturating_sub(content_area.height as usize);
         if *scroll_offset > max_scroll { *scroll_offset = max_scroll; }
         
@@ -333,7 +373,7 @@ impl App {
     }
 
     fn render_help_bar(frame: &mut Frame, area: Rect) {
-        let help_text = "Enter:Input | ↑↓:Scroll | Tab:Switch Column | Esc:Cancel | Ctrl+Q:Quit";
+        let help_text = "Enter:Input | ↑↓:Scroll | ←→:View Long Text | Tab:Switch | Esc:Cancel | Ctrl+Q:Quit";
         let paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray)).block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Gray)));
         frame.render_widget(paragraph, area);
     }
@@ -341,10 +381,10 @@ impl App {
     pub async fn handle_gameplay_input(&mut self, event: KeyEvent, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
         match &mut self.route {
             Route::Gameplay(state) => {
-                // 全局快捷键：无论是否处于编辑模式，始终生效
                 match event.code {
                     KeyCode::Tab => {
-                        state.is_editing = false; // 退出编辑模式
+                        state.is_editing = false; 
+                        state.list_scroll_offset = 0; // 🌟 切换列时重置水平滚动
                         state.selected_column = match state.selected_column {
                             ColumnType::Stats => ColumnType::Tags,
                             ColumnType::Tags => ColumnType::Inventory,
@@ -357,7 +397,6 @@ impl App {
                 }
 
                 if state.is_editing && !state.is_processing {
-                    // 🌟 传递 tx
                     self.handle_editing_input(event, narrator, tx).await;
                 } else {
                     self.handle_navigation_input(event);
@@ -391,7 +430,6 @@ impl App {
             if input.starts_with('/') { 
                 self.handle_command(&input).await; 
             } else { 
-                // 🌟 传递 tx
                 self.handle_player_input(&input, narrator, tx).await; 
             }
         }
@@ -408,7 +446,6 @@ impl App {
     }
     
     async fn handle_player_input(&mut self, input: &str, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
-        // 1. 同步更新 UI 和全局 history（保持原有逻辑不变）
         let history_clone = {
             let data = save_data();
             let mut guard = data.lock().unwrap();
@@ -422,23 +459,17 @@ impl App {
             guard.raw_history.clone()
         };
 
-        // 2. 开启 Loading 状态，阻止用户继续发送
         if let Route::Gameplay(state) = &mut self.route {
             state.is_processing = true;
         }
 
-        // 3. 克隆 Arc 和输入字符串，准备移入后台任务
         let narrator_clone = narrator.clone();
         let input_clone = input.to_string();
 
-        // 4. 🌟 启动后台任务，彻底解放主线程
         tokio::spawn(async move {
             let mut history = history_clone;
-
-            // 在后台执行耗时的 LLM 请求（Arc 拥有 'static 生命周期，安全 await）
             let result = narrator_clone.chat(&input_clone, &mut history).await;
 
-            // 请求结束后，在后台直接更新全局的 raw_history
             {
                 let data = save_data();
                 if let Ok(mut guard) = data.lock() {
@@ -446,7 +477,6 @@ impl App {
                 }
             }
 
-            // 5. 通过 Channel 将结果发回主线程
             match result {
                 Ok(response) => {
                     let _ = tx.send(AppEvent::LlmResponse(response));
@@ -462,7 +492,7 @@ impl App {
         if let Route::Gameplay(state) = &mut self.route {
             if let Some(save_data) = &mut state.selected_save_data {
                 save_data.history.push(Dialogue::new(speaker.to_string(), Some(content)));
-                state.dialogue_scroll_offset = usize::MAX; // 触发自动滚动到底部
+                state.dialogue_scroll_offset = usize::MAX; 
             }
         }
     }
@@ -473,7 +503,8 @@ impl App {
             "  /save  - Save current game".to_string(), "  /load  - Load saved game".to_string(),
             "  /quit  - Return to main menu".to_string(), "".to_string(),
             "Controls:".to_string(), "  Enter - Start typing".to_string(),
-            "  ↑/↓   - Scroll".to_string(), "  Tab   - Switch columns".to_string(),
+            "  ↑/↓   - Scroll".to_string(), "  ←/→   - View long text".to_string(),
+            "  Tab   - Switch columns".to_string(),
             "  Esc   - Cancel input".to_string(), "  Ctrl+Q - Quit".to_string(),
         ].join("\n");
         self.add_dialogue("System", help_text);
@@ -557,14 +588,17 @@ impl App {
                         ColumnType::Stats => {
                             let i = match state.stats_state.selected() { Some(i) => i.saturating_sub(1), None => 0 };
                             state.stats_state.select(Some(i));
+                            state.list_scroll_offset = 0; // 🌟 切换选中项时重置水平滚动
                         },
                         ColumnType::Tags => {
                             let i = match state.tags_state.selected() { Some(i) => i.saturating_sub(1), None => 0 };
                             state.tags_state.select(Some(i));
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Inventory => {
                             let i = match state.inventory_state.selected() { Some(i) => i.saturating_sub(1), None => 0 };
                             state.inventory_state.select(Some(i));
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Dialogue => {
                             if state.dialogue_scroll_offset > 0 { state.dialogue_scroll_offset -= 1; }
@@ -576,18 +610,38 @@ impl App {
                         ColumnType::Stats => {
                             let i = match state.stats_state.selected() { Some(i) => i + 1, None => 0 };
                             state.stats_state.select(Some(i));
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Tags => {
                             let i = match state.tags_state.selected() { Some(i) => i + 1, None => 0 };
                             state.tags_state.select(Some(i));
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Inventory => {
                             let i = match state.inventory_state.selected() { Some(i) => i + 1, None => 0 };
                             state.inventory_state.select(Some(i));
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Dialogue => {
                             state.dialogue_scroll_offset = state.dialogue_scroll_offset.saturating_add(1);
                         }
+                    }
+                },
+                // 🌟 新增：左右键水平滚动
+                KeyCode::Left => {
+                    match state.selected_column {
+                        ColumnType::Stats | ColumnType::Tags | ColumnType::Inventory => {
+                            state.list_scroll_offset = state.list_scroll_offset.saturating_sub(1);
+                        }
+                        _ => {}
+                    }
+                },
+                KeyCode::Right => {
+                    match state.selected_column {
+                        ColumnType::Stats | ColumnType::Tags | ColumnType::Inventory => {
+                            state.list_scroll_offset = state.list_scroll_offset.saturating_add(1);
+                        }
+                        _ => {}
                     }
                 },
                 _ => {},

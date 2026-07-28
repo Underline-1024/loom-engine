@@ -4,7 +4,7 @@ use ratatui::{self, Frame};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use crate::config::LlmConfig;
-use ratatui_textarea::TextArea;
+use ratatui_textarea::{TextArea, WrapMode};
 use super::{App, Route};
 use std::path::PathBuf;
 use std::fs;
@@ -43,6 +43,7 @@ impl Default for SettingsState {
         let mut max_tokens = TextArea::default();
         let mut max_turns = TextArea::default();
         let mut system_prompt = TextArea::default();
+        system_prompt.set_wrap_mode(WrapMode::WordOrGlyph);
         let mut enable_dynamic = false;
 
         // 尝试读取现有配置进行预填充

@@ -78,8 +78,7 @@ impl App {
                 Style::default()
                     .bg(Color::LightGreen)
                     .add_modifier(Modifier::BOLD),
-            )
-            .highlight_symbol("▶ ");
+            );
 
         if let Route::Saves(state) = &mut self.route {
             frame.render_stateful_widget(save_list, area, state);
