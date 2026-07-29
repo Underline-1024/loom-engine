@@ -31,9 +31,9 @@
 -   [Keyboard Shortcuts](#keyboard-shortcuts)
 -   [License](#-license)
 
-## Quick Start
+## 🚀 Quick Start
 
-### Configuration
+### ⚙️ Configuration
 
 1.  Download the pre-built binary for your platform from the [Releases page](https://github.com/Underline-1024/loom-engine/releases), extract it, and run the executable to enter the main menu.
 
@@ -47,7 +47,7 @@
     -   `PROVIDER_BASE_URL`: The Base URL of the model API
     -   `PROVIDER_API_KEY`: Your API key for the corresponding platform
 
-### Usage
+### 🎮 Usage
 
 1.  **Main Menu**: Use `↑` `↓` to navigate options, `Enter` to confirm.
 
@@ -80,7 +80,7 @@ cd loom-engine
 cargo run
 ```
 
-## Core Features
+## ✨ Core Features
 
 -   **Complete Stat System & Toolchain**: Built-in numeric stats, tag-based traits, and inventory system. The LLM can read and write game state in real time via a full suite of tool functions, rather than merely generating text.
 -   **Natural Language Driven Interaction**: Players input arbitrary actions in natural language. The LLM automatically parses intent, advances the narrative, and synchronizes underlying stats and inventory state.
@@ -92,7 +92,7 @@ cargo run
 -   [ ] Plugin extension system
 -   [ ] Local vector database integration
 
-## Settings Guide
+## 📋 Settings Guide
 
 | Field | Description |
 | :--- | :--- |
@@ -104,7 +104,7 @@ cargo run
 | **Max Turns** | Maximum interaction turns within a single model response (note: this refers to tool-calling/reasoning loops per response, NOT conversation history turns) |
 | **System Prompt** | Global system instructions |
 
-## Keyboard Shortcuts
+## ⌨️ Keyboard Shortcuts
 
 | Shortcut | Function | Scope |
 | :--- | :--- | :--- |
