@@ -212,7 +212,7 @@ impl Project {
                     4. Output ONLY the raw text of the prologue via the tool. Do not include any conversational filler, greetings, meta-text, or premature attribute/item definitions.",
                     prompt
                 );
-                let _ = n.chat(&init_and_prologue_prompt, &mut raw_history).await;
+                let _ = n.stream_narrate(&init_and_prologue_prompt, &mut raw_history).await;
 
                 let init_stats_prompt = "Now that the scene is set, initialize the player character's starting attributes and inventory based on the world setting and the current situation.\n\n\
                     CRITICAL TOOL CONSTRAINT: You MUST use the designated stat/inventory modification tools to set these values. Do NOT describe them in plain text or add any narrative.\n\n\
@@ -220,7 +220,7 @@ impl Project {
                     1. Set core numeric stats with values that feel appropriate for someone who has just awakened in this environment.\n\
                     2. Add starting items that would logically be found on or near the player given the context of the prologue.\n\
                     3. Only perform tool calls. Do not output any additional text.";
-                let _ = n.chat(init_stats_prompt, &mut raw_history).await;
+                let _ = n.stream_narrate(init_stats_prompt, &mut raw_history).await;
 
                 let data = save_data();
                 let mut guard = data.lock().unwrap();

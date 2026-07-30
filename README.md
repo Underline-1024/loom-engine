@@ -69,6 +69,8 @@
 
     ![gameplay](./assets/gameplay.png)
 
+6. **Save**: Before you exit the Gameplay page, remember to enter `/save` in the input box to save your progress! You can enter `/help` to view more commands.
+
 ## 🛠️ Local Development & Building from Source
 
 ```bash

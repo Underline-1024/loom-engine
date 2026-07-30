@@ -186,7 +186,7 @@ impl Narrator {
         agent.chat(prompt, history).await
     }
     
-    pub async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()> {
+    pub async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
         let guard = self.agent.lock().await;
         let agent = guard
             .as_ref()
@@ -256,7 +256,7 @@ impl Narrator {
 #[async_trait]
 pub trait DynAgent: Send + Sync {
     async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String>;
-    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()>;
+    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String>;
     async fn add_context(&mut self, doc: &str);
     async fn clear_context(&mut self);
     async fn set_preamble(&mut self, preamble: String);
@@ -270,7 +270,7 @@ where
         self.prompt(prompt).with_history(history).await.map_err(|e| e.into())
     }
 
-    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()> {
+    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
         let mut stream = self.stream_prompt(prompt).with_history(history.clone()).await;
         let mut res = "".to_string();
         while let Some(item) = stream.next().await {
@@ -282,8 +282,8 @@ where
                 _ => {}
             }
         }
-        history.push(res.into());
-        Ok(())
+        history.push(res.clone().into());
+        Ok(res)
     }
 
     async fn add_context(&mut self, doc: &str) {

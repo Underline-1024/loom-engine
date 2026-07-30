@@ -467,7 +467,7 @@ impl App {
 
         tokio::spawn(async move {
             let mut history = history_clone;
-            let result = narrator_clone.chat(&input_clone, &mut history).await;
+            let result = narrator_clone.stream_narrate(&input_clone, &mut history).await;
 
             {
                 let data = save_data();

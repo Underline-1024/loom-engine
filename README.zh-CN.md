@@ -72,6 +72,8 @@
 
     ![gameplay](./assets/gameplay.png)
 
+6. **保存**： 在你退出 Gameplay 页面之前，记得在输入框输入 `/save` 进行保存！你可以输入 `/help` 查看更多命令。
+
 ## 🛠️ 本地开发与源码构建
 
 ```bash
