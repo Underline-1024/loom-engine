@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use rig::agent::MultiTurnStreamItem;
 use rig::message::Message;
+use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
 use rig::{agent::Agent, completion::Document};
 use rig::client::ProviderClient;
 use rig::completion::Prompt;
@@ -182,6 +185,15 @@ impl Narrator {
 
         agent.chat(prompt, history).await
     }
+    
+    pub async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()> {
+        let guard = self.agent.lock().await;
+        let agent = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Narrator not initialized. Call init() first."))?;
+
+        agent.stream_narrate(prompt, history).await
+    }
 
     pub async fn add_context(&self, doc: &str) -> Result<()> {
         let mut guard = self.agent.lock().await;
@@ -244,6 +256,7 @@ impl Narrator {
 #[async_trait]
 pub trait DynAgent: Send + Sync {
     async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String>;
+    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()>;
     async fn add_context(&mut self, doc: &str);
     async fn clear_context(&mut self);
     async fn set_preamble(&mut self, preamble: String);
@@ -251,10 +264,26 @@ pub trait DynAgent: Send + Sync {
 #[async_trait]
 impl<T> DynAgent for Agent<T>
 where
-    T: rig::completion::CompletionModel + Send + Sync,
+    T: rig::completion::CompletionModel + Send + Sync + 'static,
 {
     async fn chat(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
         self.prompt(prompt).with_history(history).await.map_err(|e| e.into())
+    }
+
+    async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<()> {
+        let mut stream = self.stream_prompt(prompt).with_history(history.clone()).await;
+        let mut res = "".to_string();
+        while let Some(item) = stream.next().await {
+            match item? {
+                MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text)) => {
+                    res.push_str(text.text());
+                }
+                MultiTurnStreamItem::FinalResponse(_) => {},
+                _ => {}
+            }
+        }
+        history.push(res.into());
+        Ok(())
     }
 
     async fn add_context(&mut self, doc: &str) {
