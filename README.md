@@ -33,6 +33,8 @@
 
 ## 🚀 Quick Start
 
+> If you encounter any issues while using this project or have any ideas or suggestions, feel free to reach out! You can contact me via [loom-engine@outlook.com](loom-engine@outlook.com), or share your feedback and start a discussion through [Issues](https://github.com/Underline-1024/loom-engine/issues) or [Discussions](https://github.com/Underline-1024/loom-engine/discussions). I'll do my best to respond.
+
 ### ⚙️ Configuration
 
 1.  Download the pre-built binary for your platform from the [Releases page](https://github.com/Underline-1024/loom-engine/releases), extract it, and run the executable to enter the main menu.

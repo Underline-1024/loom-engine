@@ -36,6 +36,8 @@
 
 ## 🚀 快速开始
 
+> 如果你在使用这个项目的过程中遇到了问题或者对于这个项目有什么想法，欢迎进行反馈！你可以通过 [loom-engine@outlook.com](loom-engine@outlook.com) 这个邮箱来找我，也可以去 [Issues](https://github.com/Underline-1024/loom-engine/issues) 和 [Discussions](https://github.com/Underline-1024/loom-engine/discussions) 进行反馈和交流，我会尽力回复。
+
 ### ⚙️ 项目配置
 
 1. 从 [Releases 页面](https://github.com/Underline-1024/loom-engine/releases) 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
