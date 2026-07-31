@@ -40,17 +40,17 @@
 
 ### ⚙️ 项目配置
 
-1. 从 [Releases 页面](https://github.com/Underline-1024/loom-engine/releases) 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
+1. 配置环境变量。需要配置以下两个环境变量（将 `PROVIDER` 替换为实际使用的平台名称，如 `OPENAI`、`ANTHROPIC`）：
+    -   `PROVIDER_BASE_URL`：模型 API 的 Base URL
+    -   `PROVIDER_API_KEY`：对应平台的 API Key
+
+2. 从 [Releases 页面](https://github.com/Underline-1024/loom-engine/releases) 下载对应平台的打包文件，解压后运行可执行文件进入主菜单。
 
     ![main menu](./assets/main_menu.png)
 
-2. 进入 Settings 页面，根据自身情况调整 Provider 和 Model 字段，完整设置介绍详见 [设置指南](#设置指南)。
+3. 进入 Settings 页面，根据自身情况调整 Provider 和 Model 字段，完整设置介绍详见 [设置指南](#设置指南)。
 
     ![settings](./assets/settings.png)
-
-3. 配置环境变量。需要配置以下两个环境变量（将 `PROVIDER` 替换为实际使用的平台名称，如 `OPENAI`、`ANTHROPIC`）：
-    -   `PROVIDER_BASE_URL`：模型 API 的 Base URL
-    -   `PROVIDER_API_KEY`：对应平台的 API Key
 
 ### 🎮 使用流程
 

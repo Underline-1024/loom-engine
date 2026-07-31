@@ -37,17 +37,17 @@
 
 ### ⚙️ Configuration
 
-1.  Download the pre-built binary for your platform from the [Releases page](https://github.com/Underline-1024/loom-engine/releases), extract it, and run the executable to enter the main menu.
+1.  Configure environment variables. The following two variables are required (replace `PROVIDER` with your actual platform name in uppercase, e.g., `OPENAI`, `ANTHROPIC`):
+    -   `PROVIDER_BASE_URL`: The Base URL of the model API
+    -   `PROVIDER_API_KEY`: Your API key for the corresponding platform
+
+2.  Download the pre-built binary for your platform from the [Releases page](https://github.com/Underline-1024/loom-engine/releases), extract it, and run the executable to enter the main menu.
 
     ![main menu](./assets/main_menu.png)
 
-2.  Navigate to the Settings page and adjust the Provider and Model fields according to your setup. See the [Settings Guide](#settings-guide) for full details.
+3.  Navigate to the Settings page and adjust the Provider and Model fields according to your setup. See the [Settings Guide](#settings-guide) for full details.
 
     ![settings](./assets/settings.png)
-
-3.  Configure environment variables. The following two variables are required (replace `PROVIDER` with your actual platform name in uppercase, e.g., `OPENAI`, `ANTHROPIC`):
-    -   `PROVIDER_BASE_URL`: The Base URL of the model API
-    -   `PROVIDER_API_KEY`: Your API key for the corresponding platform
 
 ### 🎮 Usage
 
