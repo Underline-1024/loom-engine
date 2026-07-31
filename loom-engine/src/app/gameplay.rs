@@ -40,6 +40,7 @@ pub struct GameplayState {
     pub inventory_state: ListState,
     pub dialogue_scroll_offset: usize,
     pub list_scroll_offset: usize, // 🌟 新增：列表水平滚动偏移量
+    pub last_rendered_dialogue_count: Option<usize>,
 }
 
 impl Default for GameplayState {
@@ -56,12 +57,14 @@ impl Default for GameplayState {
             inventory_state: ListState::default(),
             dialogue_scroll_offset: usize::MAX, 
             list_scroll_offset: 0, // 🌟 初始化
+            last_rendered_dialogue_count: None,
         }
     }
 }
 
 impl GameplayState {
     pub fn new(save_data: SaveData) -> Self {
+        let dialogue_count = save_data.history.len();
         Self {
             selected_save_data: Some(save_data),
             input: String::new(),
@@ -74,6 +77,7 @@ impl GameplayState {
             inventory_state: ListState::default(),
             dialogue_scroll_offset: usize::MAX, 
             list_scroll_offset: 0, // 🌟 初始化
+            last_rendered_dialogue_count: Some(dialogue_count),
         }
     }
 }
@@ -128,7 +132,24 @@ impl App {
         if let Route::Gameplay(state) = &mut self.route {
             let data = save_data();
             if let Ok(guard) = data.lock() {
+                // 1. 🌟 零拷贝获取当前对白数量（直接读引用，极快）
+                let new_count = guard.history.len();
+                
+                // 2. 同步完整状态到 UI (这里必须 clone，因为要脱离 Mutex 锁的生命周期)
                 state.selected_save_data = Some(guard.clone());
+
+                // 3. 🌟 优雅的对比逻辑
+                let should_scroll = match state.last_rendered_dialogue_count {
+                    Some(old_count) => new_count > old_count,
+                    None => true, // 首次渲染，强制滚到底
+                };
+
+                if should_scroll {
+                    state.dialogue_scroll_offset = usize::MAX;
+                }
+                
+                // 4. 记录当前的数量，供下一帧对比
+                state.last_rendered_dialogue_count = Some(new_count);
             }
         }
 
