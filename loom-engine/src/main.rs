@@ -80,19 +80,20 @@ async fn main() -> Result<()> {
                 _ = &mut shutdown_rx => {
                     break;
                 },
-                result = async { event::read() } => {
-                    if let Ok(event) = result {
-                        match event {
-                            Event::Key(key) => {
-                                if key.kind == KeyEventKind::Press {
+                result = tokio::task::spawn_blocking(event::read) => {
+                    match result {
+                        Ok(Ok(event)) => {
+                            match event {
+                                Event::Key(key) if key.kind == KeyEventKind::Press => {
                                     let _ = key_tx.send(AppEvent::Key(key));
-                                }
-                            },
-                            Event::Resize(_, _) => {
-                                let _ = key_tx.send(AppEvent::Resize);
-                            },
-                            _ => {},
+                                },
+                                Event::Resize(_, _) => {
+                                    let _ = key_tx.send(AppEvent::Resize);
+                                },
+                                _ => {},
+                            }
                         }
+                        _ => break,
                     }
                 },
             }
