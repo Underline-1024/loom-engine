@@ -58,7 +58,6 @@ fn init_logging() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AppEvent>();
     let key_tx = tx.clone();
 
@@ -66,7 +65,7 @@ async fn main() -> Result<()> {
     init_save_data(GameMode::default());
     
     // 1. 正常创建和初始化 Narrator
-    let mut narrator_instance = Narrator::new();
+    let narrator_instance = Narrator::new();
     let dynamic_tool_count = 5;
     let llm_config = LlmConfig::load()?;
     narrator_instance.init(&llm_config, dynamic_tool_count).await?;
@@ -74,28 +73,23 @@ async fn main() -> Result<()> {
     // 🌟 2. 将初始化好的 narrator 包装进 Arc 中
     let narrator = Arc::new(narrator_instance);
 
-    tokio::spawn(async move {
+    std::thread::spawn(move || {
         loop {
-            tokio::select! {
-                _ = &mut shutdown_rx => {
-                    break;
-                },
-                result = tokio::task::spawn_blocking(event::read) => {
-                    match result {
-                        Ok(Ok(event)) => {
-                            match event {
-                                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                                    let _ = key_tx.send(AppEvent::Key(key));
-                                },
-                                Event::Resize(_, _) => {
-                                    let _ = key_tx.send(AppEvent::Resize);
-                                },
-                                _ => {},
-                            }
+            match event::read() {
+                Ok(event) => {
+                    let app_event = match event {
+                        Event::Key(key) if key.kind == KeyEventKind::Press => Some(AppEvent::Key(key)),
+                        Event::Resize(_, _) => Some(AppEvent::Resize),
+                        _ => None,
+                    };
+                    
+                    if let Some(evt) = app_event {
+                        if key_tx.send(evt).is_err() {
+                            break; 
                         }
-                        _ => break,
                     }
-                },
+                }
+                Err(_) => break, // 读取发生致命错误，退出线程
             }
         }
     });
@@ -176,7 +170,6 @@ async fn main() -> Result<()> {
     
                             // 主菜单按 Esc 退出应用
                             if key_code == KeyCode::Esc && matches!(app.route, Route::MainMenu) {
-                                drop(shutdown_tx);
                                 break;
                             }
                             
@@ -224,8 +217,6 @@ async fn main() -> Result<()> {
         }
         
         execute!(stdout(), crossterm::event::DisableMouseCapture).unwrap();
-        
-        // 清理终端
         ratatui::restore();
     }
     
