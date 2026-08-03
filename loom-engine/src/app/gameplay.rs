@@ -10,6 +10,7 @@ use ratatui::{
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
+use ratatui_textarea::TextArea;
 
 use crate::{actor::Stat, llm::Narrator, save::SaveData};
 use crate::story::Dialogue;
@@ -28,7 +29,7 @@ pub enum ColumnType {
 #[derive(Debug, Clone)]
 pub struct GameplayState {
     pub selected_save_data: Option<SaveData>,
-    pub input: String,
+    pub input: TextArea<'static>,
     pub is_editing: bool,
     pub selected_column: ColumnType,
     pub is_processing: bool,
@@ -39,15 +40,18 @@ pub struct GameplayState {
     pub tags_state: ListState,
     pub inventory_state: ListState,
     pub dialogue_scroll_offset: usize,
-    pub list_scroll_offset: usize, // 🌟 新增：列表水平滚动偏移量
+    pub list_scroll_offset: usize,
     pub last_rendered_dialogue_count: Option<usize>,
 }
 
 impl Default for GameplayState {
     fn default() -> Self {
+        let mut ta = TextArea::default();
+        ta.set_cursor_line_style(Style::default());
+        
         Self {
             selected_save_data: None,
-            input: String::new(),
+            input: ta,
             is_editing: false,
             selected_column: ColumnType::Stats,
             is_processing: false,
@@ -56,7 +60,7 @@ impl Default for GameplayState {
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
             dialogue_scroll_offset: usize::MAX, 
-            list_scroll_offset: 0, // 🌟 初始化
+            list_scroll_offset: 0,
             last_rendered_dialogue_count: None,
         }
     }
@@ -65,9 +69,12 @@ impl Default for GameplayState {
 impl GameplayState {
     pub fn new(save_data: SaveData) -> Self {
         let dialogue_count = save_data.history.len();
+        let mut ta = TextArea::default();
+        ta.set_cursor_line_style(Style::default());
+        
         Self {
             selected_save_data: Some(save_data),
-            input: String::new(),
+            input: ta,
             is_editing: false,
             selected_column: ColumnType::Stats,
             is_processing: false,
@@ -76,7 +83,7 @@ impl GameplayState {
             tags_state: ListState::default(),
             inventory_state: ListState::default(),
             dialogue_scroll_offset: usize::MAX, 
-            list_scroll_offset: 0, // 🌟 初始化
+            list_scroll_offset: 0,
             last_rendered_dialogue_count: Some(dialogue_count),
         }
     }
@@ -161,7 +168,7 @@ impl App {
                 std::mem::take(&mut s.tags_state),
                 std::mem::take(&mut s.inventory_state),
                 s.dialogue_scroll_offset,
-                s.list_scroll_offset, // 🌟 提取
+                s.list_scroll_offset,
                 s.selected_column
             ),
             _ => return,
@@ -205,7 +212,7 @@ impl App {
             .constraints([Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
             .split(top_chunks[0]);
         
-        // 3. 渲染各组件 (🌟 传入 &mut list_scroll_offset)
+        // 3. 渲染各组件
         Self::render_numeric_stats(save_data, frame, left_chunks[0], &mut stats_state, selected_col == ColumnType::Stats, &mut list_scroll_offset);
         Self::render_tag_stats(save_data, frame, left_chunks[1], &mut tags_state, selected_col == ColumnType::Tags, &mut list_scroll_offset);
         Self::render_inventory(save_data, frame, left_chunks[2], &mut inv_state, selected_col == ColumnType::Inventory, &mut list_scroll_offset);
@@ -218,8 +225,8 @@ impl App {
             s.tags_state = tags_state;
             s.inventory_state = inv_state;
             s.dialogue_scroll_offset = dialogue_scroll;
-            s.list_scroll_offset = list_scroll_offset; // 🌟 恢复
-            Self::render_input_area(frame, main_chunks[1], s);
+            s.list_scroll_offset = list_scroll_offset;
+            Self::render_input_area(frame, main_chunks[1], s); // 🌟 s 已经是可变引用
         }
         Self::render_help_bar(frame, main_chunks[2]);
     }
@@ -373,29 +380,34 @@ impl App {
         frame.render_widget(paragraph, content_area);
     }
 
-    fn render_input_area(frame: &mut Frame, area: Rect, gameplay_state: &GameplayState) {
-        let prefix = "> ";
-        let input_text = if gameplay_state.is_editing {
-            if gameplay_state.is_processing { format!("{}Processing...", prefix) } else { format!("{}{}", prefix, gameplay_state.input) }
-        } else {
-            format!("{}[Press Enter to input]", prefix)
-        };
-        
-        let style = if gameplay_state.is_editing && !gameplay_state.is_processing {
-            Style::default().fg(Color::White)
+    // 🌟 更新为接收 &mut GameplayState 并渲染 TextArea
+    fn render_input_area(frame: &mut Frame, area: Rect, gameplay_state: &mut GameplayState) {
+        let block = Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::Gray));
+            
+        if gameplay_state.is_editing && !gameplay_state.is_processing {
+            gameplay_state.input.set_block(block);
+            gameplay_state.input.set_style(Style::default().fg(Color::White));
+            frame.render_widget(&gameplay_state.input, area);
         } else if gameplay_state.is_processing {
-            Style::default().fg(Color::Yellow)
+            let input_text = "> Processing...";
+            let style = Style::default().fg(Color::Yellow);
+            let paragraph = Paragraph::new(input_text).style(style).block(block);
+            frame.render_widget(paragraph, area);
         } else {
-            Style::default().fg(Color::DarkGray)
-        };
-        
-        let paragraph = Paragraph::new(input_text).style(style).wrap(Wrap { trim: true }).block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Gray)));
-        frame.render_widget(paragraph, area);
+            let input_text = "> [Press Enter to input]";
+            let style = Style::default().fg(Color::DarkGray);
+            let paragraph = Paragraph::new(input_text).style(style).block(block);
+            frame.render_widget(paragraph, area);
+        }
     }
 
     fn render_help_bar(frame: &mut Frame, area: Rect) {
-        let help_text = "Enter:Input | ↑↓:Scroll | ←→:View Long Text | Tab:Switch | Esc:Back";
-        let paragraph = Paragraph::new(help_text).style(Style::default().fg(Color::DarkGray)).block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Gray)));
+        let help_text = "Enter:Send | Alt+Enter / Ctrl+O:Newline | Paste:MultiLine | ↑↓:Scroll | Tab:Switch | Esc:Back";
+        let paragraph = Paragraph::new(help_text)
+            .style(Style::default().fg(Color::DarkGray))
+            .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::Gray)));
         frame.render_widget(paragraph, area);
     }
 
@@ -405,7 +417,7 @@ impl App {
                 match event.code {
                     KeyCode::Tab => {
                         state.is_editing = false; 
-                        state.list_scroll_offset = 0; // 🌟 切换列时重置水平滚动
+                        state.list_scroll_offset = 0;
                         state.selected_column = match state.selected_column {
                             ColumnType::Stats => ColumnType::Tags,
                             ColumnType::Tags => ColumnType::Inventory,
@@ -430,27 +442,38 @@ impl App {
     async fn handle_editing_input(&mut self, event: KeyEvent, narrator: Arc<Narrator>, tx: UnboundedSender<AppEvent>) {
         let (input, should_process) = {
             if let Route::Gameplay(state) = &mut self.route {
-                match event.code {
-                    KeyCode::Enter => {
-                        if !state.input.is_empty() && !state.is_processing {
-                            state.is_editing = false;
-                            let input = state.input.clone();
-                            state.input.clear();
-                            (input, true)
-                        } else { (String::new(), false) }
-                    },
-                    KeyCode::Backspace => { state.input.pop(); (String::new(), false) },
-                    KeyCode::Char(c) => { state.input.push(c); (String::new(), false) },
-                    _ => (String::new(), false),
+                let is_submit = event.code == KeyCode::Enter && event.modifiers.is_empty();
+
+                let is_newline_intent =
+                    (event.code == KeyCode::Enter && event.modifiers.contains(KeyModifiers::ALT))
+                    || (event.code == KeyCode::Char('o') && event.modifiers.contains(KeyModifiers::CONTROL));
+
+                if is_submit {
+                    let text = state.input.lines().join("\n");
+                    if !text.trim().is_empty() && !state.is_processing {
+                        state.is_editing = false;
+                        let mut empty_ta = TextArea::default();
+                        empty_ta.set_cursor_line_style(Style::default());
+                        std::mem::swap(&mut state.input, &mut empty_ta);
+                        (text, true)
+                    } else {
+                        (String::new(), false)
+                    }
+                } else if is_newline_intent {
+                    state.input.insert_newline();
+                    (String::new(), false)
+                } else {
+                    state.input.input(event);
+                    (String::new(), false)
                 }
             } else { (String::new(), false) }
         };
-        
+
         if should_process && !input.is_empty() {
-            if input.starts_with('/') { 
-                self.handle_command(&input).await; 
-            } else { 
-                self.handle_player_input(&input, narrator, tx).await; 
+            if input.starts_with('/') {
+                self.handle_command(&input).await;
+            } else {
+                self.handle_player_input(&input, narrator, tx).await;
             }
         }
     }
@@ -596,19 +619,22 @@ impl App {
         self.apply_llm_response(response).await;
     }
     
+    // 🌟 进入编辑模式时重置 TextArea 状态
     fn handle_navigation_input(&mut self, event: KeyEvent) {
         if let Route::Gameplay(state) = &mut self.route {
             match event.code {
                 KeyCode::Enter => {
                     state.is_editing = true;
-                    state.input.clear();
+                    let mut ta = TextArea::default();
+                    ta.set_cursor_line_style(Style::default());
+                    state.input = ta;
                 },
                 KeyCode::Up => {
                     match state.selected_column {
                         ColumnType::Stats => {
                             let i = match state.stats_state.selected() { Some(i) => i.saturating_sub(1), None => 0 };
                             state.stats_state.select(Some(i));
-                            state.list_scroll_offset = 0; // 🌟 切换选中项时重置水平滚动
+                            state.list_scroll_offset = 0;
                         },
                         ColumnType::Tags => {
                             let i = match state.tags_state.selected() { Some(i) => i.saturating_sub(1), None => 0 };
@@ -647,7 +673,6 @@ impl App {
                         }
                     }
                 },
-                // 🌟 新增：左右键水平滚动
                 KeyCode::Left => {
                     match state.selected_column {
                         ColumnType::Stats | ColumnType::Tags | ColumnType::Inventory => {
