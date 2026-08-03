@@ -120,6 +120,7 @@ cargo run
 | `←` / `→` | 水平滚动查看过长的文本条目 | 当前高亮选中的列表项 |
 | `Tab` | 切换面板焦点 (Stats / Tags / Inventory / Dialogue) | Gameplay 页面 |
 | `Esc` | 返回上一级页面 / 退出程序 (在主菜单时) | 全局 |
+| `Alt+Enter` / `Ctrl+O` | 换行 | Gameplay 页面 |
 
 ## 📄 许可证
 

@@ -117,6 +117,7 @@ cargo run
 | `←` / `→` | Horizontally scroll truncated text entries | Currently highlighted list item |
 | `Tab` | Switch panel focus (Stats / Tags / Inventory / Dialogue) | Gameplay page |
 | `Esc` | Return to previous screen / Exit application (on main menu) | Global |
+| `Alt+Enter` / `Ctrl+O` | Insert line break | Gameplay page |
 
 ## 📄 License
 
