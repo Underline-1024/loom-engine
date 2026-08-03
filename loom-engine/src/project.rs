@@ -202,7 +202,7 @@ impl Project {
                 let init_and_prologue_prompt = format!(
                     "[WORLD SETTING]\n{}\n\n\
                     [INITIALIZATION DIRECTIVE]\n\
-                    Establish a global language constraint: ALL subsequent content generated in this session—including item names, stat names, dialogue, and narration—MUST use the exact same language as the world setting provided above.\n\n\
+                    Establish a global language constraint: ALL subsequent content generated in this session—including item names, stat names, dialogue, narration, and tool parameters—MUST be written in the same language as the world setting provided above.\n\n\
                     Based on this world setting, generate an immersive opening prologue.\n\n\
                     CRITICAL TOOL CONSTRAINT: You MUST use the designated dialogue/narration tool to output the prologue. Do NOT return the text as a plain assistant message.\n\n\
                     Rules:\n\
@@ -216,6 +216,7 @@ impl Project {
 
                 let init_stats_prompt = "Now that the scene is set, initialize the player character's starting attributes and inventory based on the world setting and the current situation.\n\n\
                     CRITICAL TOOL CONSTRAINT: You MUST use the designated stat/inventory modification tools to set these values. Do NOT describe them in plain text or add any narrative.\n\n\
+                    CRITICAL LANGUAGE CONSTRAINT: ALL generated content MUST be written in the same language as the world setting.\n\n\
                     Guidelines:\n\
                     1. Set core numeric stats with values that feel appropriate for someone who has just awakened in this environment.\n\
                     2. Add starting items that would logically be found on or near the player given the context of the prologue.\n\
