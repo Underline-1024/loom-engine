@@ -215,9 +215,10 @@ impl Project {
                 let init_prologue_prompt = format!(
                     "[WORLD SETTING]\n{}\n\n\
                     [INITIALIZATION DIRECTIVE]\n\
-                    Establish a global language constraint: ALL subsequent content generated in this session—including item names, stat names, dialogue, narration, and tool parameters—MUST be written in the same language as the world setting provided above.\n\n\
+                    CRITICAL LANGUAGE CONSTRAINT: ALL generated content MUST be written in the same language as the world setting provided above.\n\n\
                     Based on this world setting, generate an immersive opening prologue.\n\n\
                     CRITICAL TOOL CONSTRAINT: You MUST use the designated dialogue/narration tool to output the prologue. Do NOT return the text as a plain assistant message.\n\n\
+                    LENGTH GUIDANCE: The prologue should be concise — around 1 to 3 narration tool calls. If you can capture the atmosphere in a single well-crafted call, that's perfectly fine. Keep each call focused and evocative rather than sprawling. Avoid repeating the same idea across multiple calls.\n\n\
                     Rules:\n\
                     1. Focus solely on environmental descriptions, atmosphere, and background lore.\n\
                     2. Do NOT describe any actions, thoughts, or choices of the player character.\n\
