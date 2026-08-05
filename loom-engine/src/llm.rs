@@ -1,13 +1,14 @@
 use std::collections::HashMap;
+use std::error::Error;
 use std::sync::Arc;
 use async_trait::async_trait;
 use futures_util::StreamExt;
-use rig::agent::MultiTurnStreamItem;
+use rig::agent::{FinalResponse, MultiTurnStreamItem, StreamingError};
 use rig::message::Message;
 use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
 use rig::{agent::Agent, completion::Document};
 use rig::client::ProviderClient;
-use rig::completion::Prompt;
+use rig::completion::{Prompt, PromptError};
 use anyhow::{Result, Context};
 use tokio::sync::Mutex;
 use crate::config::LlmConfig;
@@ -272,18 +273,41 @@ where
 
     async fn stream_narrate(&self, prompt: &str, history: &mut Vec<Message>) -> Result<String> {
         let mut stream = self.stream_prompt(prompt).with_history(history.clone()).await;
-        let mut res = "".to_string();
+        
+        let mut text_buf = String::new();
+    
         while let Some(item) = stream.next().await {
-            match item? {
-                MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text)) => {
-                    res.push_str(text.text());
+            match item {
+                // 收集纯文本
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(text))) => {
+                    text_buf.push_str(text.text());
                 }
-                MultiTurnStreamItem::FinalResponse(_) => {},
-                _ => {}
+                // 捕获正常结束的 FinalResponse
+                Ok(MultiTurnStreamItem::FinalResponse(resp)) => {
+                    // 用 rig-core 内部的完整历史替换外部 history
+                    *history = resp.history().unwrap_or(&[]).to_vec();
+                }
+                Ok(_) => {} // 忽略 ToolCall delta 等
+                Err(e) => {
+                    tracing::error!("❌ stream 内部错误: {e:?}");
+                    if let StreamingError::Prompt(prompt_error) = e {
+                        match *prompt_error {
+                            PromptError::MaxTurnsError { max_turns: _, chat_history, prompt: _ } => {
+                                *history = *chat_history;
+                            },
+                            PromptError::PromptCancelled { chat_history, reason: _ } => {
+                                // *history = chat_history.iter().cloned().collect();
+                                *history = *chat_history;
+                            },
+                            _ => {},
+                        }
+                    }
+                    break;
+                }
             }
         }
-        history.push(res.clone().into());
-        Ok(res)
+
+        Ok(text_buf)
     }
 
     async fn add_context(&mut self, doc: &str) {

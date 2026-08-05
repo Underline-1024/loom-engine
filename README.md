@@ -98,6 +98,8 @@ cargo run
 
 ## 📋 Settings Guide
 
+>   *Note: After completing the setup, you must save the settings and restart the application for the changes to take effect.*
+
 | Field | Description |
 | :--- | :--- |
 | **Provider** | Model platform identifier, must be lowercase |

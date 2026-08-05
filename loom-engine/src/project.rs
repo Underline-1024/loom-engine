@@ -199,7 +199,20 @@ impl Project {
 
                 let mut raw_history = Vec::new();
 
-                let init_and_prologue_prompt = format!(
+                let init_stats_prompt = format!(
+                    "[WORLD SETTING]\n{}\n\n\
+                    [INITIALIZATION DIRECTIVE]\n\
+                    Now that the scene is set, initialize the player character's starting attributes and inventory based on the world setting and the current situation.\n\n\
+                    CRITICAL TOOL CONSTRAINT: You MUST use the designated stat/inventory modification tools to set these values. Do NOT describe them in plain text or add any narrative.\n\n\
+                    CRITICAL LANGUAGE CONSTRAINT: ALL generated content (stat names, item names, tags) MUST be written in the same language as the world setting provided above.\n\n\
+                    Guidelines:\n\
+                    1. Stats and items must be consistent with the world setting.\n\
+                    2. Only perform tool calls. Do not output any additional text.",
+                    prompt
+                );
+                let _ = n.stream_narrate(&init_stats_prompt, &mut raw_history).await;
+
+                let init_prologue_prompt = format!(
                     "[WORLD SETTING]\n{}\n\n\
                     [INITIALIZATION DIRECTIVE]\n\
                     Establish a global language constraint: ALL subsequent content generated in this session—including item names, stat names, dialogue, narration, and tool parameters—MUST be written in the same language as the world setting provided above.\n\n\
@@ -209,20 +222,13 @@ impl Project {
                     1. Focus solely on environmental descriptions, atmosphere, and background lore.\n\
                     2. Do NOT describe any actions, thoughts, or choices of the player character.\n\
                     3. Do NOT end with a question or a prompt asking for the player's next action.\n\
-                    4. Output ONLY the raw text of the prologue via the tool. Do not include any conversational filler, greetings, meta-text, or premature attribute/item definitions.",
+                    4. Output ONLY the raw text of the prologue via the tool. Do not include any conversational filler, greetings, meta-text, or attribute/item definitions.\n\
+                    5. This prologue is the FINAL initialization step. Once it is generated, the initialization phase is complete and the game officially begins. The prologue must end at a natural starting point where the player character is present in the scene and ready to act, so the player can immediately take over from this moment. Do NOT add any closing remarks, summaries, or transitional text indicating the prologue has ended.",
                     prompt
                 );
-                let _ = n.stream_narrate(&init_and_prologue_prompt, &mut raw_history).await;
+                let _ = n.stream_narrate(&init_prologue_prompt, &mut raw_history).await;
 
-                let init_stats_prompt = "Now that the scene is set, initialize the player character's starting attributes and inventory based on the world setting and the current situation.\n\n\
-                    CRITICAL TOOL CONSTRAINT: You MUST use the designated stat/inventory modification tools to set these values. Do NOT describe them in plain text or add any narrative.\n\n\
-                    CRITICAL LANGUAGE CONSTRAINT: ALL generated content MUST be written in the same language as the world setting.\n\n\
-                    Guidelines:\n\
-                    1. Set core numeric stats with values that feel appropriate for someone who has just awakened in this environment.\n\
-                    2. Add starting items that would logically be found on or near the player given the context of the prologue.\n\
-                    3. Only perform tool calls. Do not output any additional text.";
-                let _ = n.stream_narrate(init_stats_prompt, &mut raw_history).await;
-
+                
                 let data = save_data();
                 let mut guard = data.lock().unwrap();
                 guard.raw_history = raw_history;

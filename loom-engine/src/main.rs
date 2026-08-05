@@ -19,40 +19,28 @@ use std::sync::Arc;
 static LOG_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = OnceLock::new();
 
 fn init_logging() {
-    // 1. 创建日志目录
-    std::fs::create_dir_all("logs").ok();
+    if let Err(e) = std::fs::create_dir_all("logs") {
+        panic!("❌ 无法创建 logs 目录: {}", e);
+    }
     
-    // 2. 创建文件日志写入器
     let file_appender = tracing_appender::rolling::daily("logs", "app.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     
-    // 3. ⭐ 关键：保存 guard 到静态变量，防止被释放
     LOG_GUARD.set(guard).ok();
     
-    // 4. 创建文件日志层（写入文件）
     let file_log = fmt::layer()
         .with_target(true)
         .with_line_number(true)
         .with_file(true)
         .with_timer(fmt::time::ChronoLocal::rfc_3339())
+        .with_ansi(false) 
         .with_writer(non_blocking);
-    
-    // 5. 创建终端日志层（输出到终端）
-    let terminal_log = fmt::layer()
-        .with_target(false)
-        .with_line_number(false)
-        .with_file(false)
-        .pretty()
-        .with_writer(std::io::stderr);
-    
-    // 6. 注册所有层
+
     tracing_subscriber::registry()
         .with(EnvFilter::from_default_env())
         .with(file_log)
-        .with(terminal_log)
         .init();
     
-    // 7. 测试日志
     tracing::info!("✅ 日志系统初始化完成，日志保存在 logs/app.log");
 }
 
