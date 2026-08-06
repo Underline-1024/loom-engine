@@ -123,6 +123,11 @@ cargo run
 | `Tab` | 切换面板焦点 (Stats / Tags / Inventory / Dialogue) | Gameplay 页面 |
 | `Esc` | 返回上一级页面 / 退出程序 (在主菜单时) | 全局 |
 | `Alt+Enter` / `Ctrl+O` | 换行 | Gameplay 页面 |
+| `Ctrl+R` | 刷新 | Projects 页面 |
+| `R` | 刷新 | Saves 页面 |
+| `Ctrl+N` | 新建 | Projects 页面 |
+| `Ctrl+D` | 删除 | Projects 页面 |
+| `E` | 编辑 | Projects 页面 |
 
 ## 📄 许可证
 

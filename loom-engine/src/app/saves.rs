@@ -430,7 +430,6 @@ impl App {
                 }
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
-                // R: 刷新
                 let _ = self.refresh_saves();
             }
             KeyCode::Esc => {
