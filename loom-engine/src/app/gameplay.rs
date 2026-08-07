@@ -351,24 +351,16 @@ impl App {
             
             let prefix_str = format!("[{}] {} {}: ", timestamp, speaker_prefix, dialogue.speaker);
             let content_str = dialogue.content.as_deref().unwrap_or("");
-            
-            let prefix_display_width = prefix_str.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>();
-            let indent_str = " ".repeat(prefix_display_width);
-            let first_line_max_width = width.saturating_sub(prefix_display_width);
-            let content_lines = wrap_text(content_str, first_line_max_width);
-            
-            for (i, line_str) in content_lines.iter().enumerate() {
-                if i == 0 {
-                    all_lines.push(Line::from(vec![
-                        Span::styled(prefix_str.clone(), speaker_style),
-                        Span::styled(line_str.clone(), Style::default().fg(Color::White))
-                    ]));
-                } else {
-                    all_lines.push(Line::from(vec![
-                        Span::raw(indent_str.clone()), 
-                        Span::styled(line_str.clone(), Style::default().fg(Color::White))
-                    ]));
-                }
+
+            all_lines.push(Line::from(vec![Span::styled(prefix_str, speaker_style)]));
+
+            let content_lines = wrap_text(content_str, width);
+
+            for line_str in content_lines {
+                all_lines.push(Line::from(vec![Span::styled(
+                    line_str,
+                    Style::default().fg(Color::White),
+                )]));
             }
         }
         
