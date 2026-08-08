@@ -218,6 +218,7 @@ impl Project {
                     CRITICAL LANGUAGE CONSTRAINT: ALL generated content MUST be written in the same language as the world setting provided above.\n\n\
                     Based on this world setting, generate an immersive opening prologue.\n\n\
                     CRITICAL TOOL CONSTRAINT: You MUST use the designated dialogue/narration tool to output the prologue. Do NOT return the text as a plain assistant message.\n\n\
+                    CRITICAL MARKDOWN CONSTRAINT: ALL content passed to the dialogue/narration tool MUST be clean, beautiful, TUI-friendly Markdown. Use short paragraphs, blank lines, blockquotes for quoted speech or inscriptions, bold for important objects or warnings, italics for emphasis, and fenced code blocks only for diegetic terminals, logs, spells, or system messages. Do NOT use HTML, images, Mermaid diagrams, raw ANSI escape codes, complex tables, deeply nested lists, or overly wide ASCII art.\n\n\
                     LENGTH GUIDANCE: The prologue should be concise — around 1 to 3 narration tool calls. If you can capture the atmosphere in a single well-crafted call, that's perfectly fine. Keep each call focused and evocative rather than sprawling. Avoid repeating the same idea across multiple calls.\n\n\
                     Rules:\n\
                     1. Focus solely on environmental descriptions, atmosphere, and background lore.\n\
@@ -228,7 +229,6 @@ impl Project {
                     prompt
                 );
                 let _ = n.stream_narrate(&init_prologue_prompt, &mut raw_history).await;
-
                 
                 let data = save_data();
                 let mut guard = data.lock().unwrap();

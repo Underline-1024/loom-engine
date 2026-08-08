@@ -1,5 +1,4 @@
 use std::sync::Arc;
-
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -11,12 +10,51 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use ratatui_textarea::TextArea;
-
+use tui_markdown::from_str;
 use crate::{actor::Stat, llm::Narrator, save::SaveData};
 use crate::story::Dialogue;
 use crate::llm::tool::builtin_tools::save_data;
-
 use super::{App, AppEvent, Route};
+
+fn wrap_text_lines_owned(text: Text<'_>, max_width: u16) -> Vec<Line<'static>> {
+    let mut wrapped_lines = Vec::new();
+    let max_width = max_width.max(1) as usize;
+
+    for line in text.lines {
+        let mut current_spans: Vec<Span<'static>> = Vec::new();
+        let mut current_width = 0;
+
+        for span in line.spans {
+            let style = span.style;
+            // 直接转为 String，方便后续切片和缓存
+            let content = span.content.into_owned(); 
+            
+            let mut start_idx = 0;
+            for (i, c) in content.char_indices() {
+                let c_width = if c.is_ascii() { 1 } else { 2 }; // 简单宽度计算
+                
+                if current_width + c_width > max_width {
+                    if start_idx < i {
+                        let slice = content[start_idx..i].to_string();
+                        current_spans.push(Span::styled(slice, style));
+                    }
+                    wrapped_lines.push(Line::from(current_spans));
+                    current_spans = Vec::new();
+                    current_width = 0;
+                    start_idx = i;
+                }
+                current_width += c_width;
+            }
+            
+            if start_idx < content.len() {
+                let slice = content[start_idx..].to_string();
+                current_spans.push(Span::styled(slice, style));
+            }
+        }
+        wrapped_lines.push(Line::from(current_spans));
+    }
+    wrapped_lines
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {
@@ -42,6 +80,10 @@ pub struct GameplayState {
     pub dialogue_scroll_offset: usize,
     pub list_scroll_offset: usize,
     pub last_rendered_dialogue_count: Option<usize>,
+
+    pub cached_dialogue_lines: Vec<Line<'static>>,
+    pub last_known_dialogue_count: usize,
+    pub last_known_width: u16,
 }
 
 impl Default for GameplayState {
@@ -62,6 +104,9 @@ impl Default for GameplayState {
             dialogue_scroll_offset: usize::MAX, 
             list_scroll_offset: 0,
             last_rendered_dialogue_count: None,
+            cached_dialogue_lines: Vec::new(),
+            last_known_dialogue_count: 0,
+            last_known_width: 0,
         }
     }
 }
@@ -85,6 +130,9 @@ impl GameplayState {
             dialogue_scroll_offset: usize::MAX, 
             list_scroll_offset: 0,
             last_rendered_dialogue_count: Some(dialogue_count),
+            cached_dialogue_lines: Vec::new(),
+            last_known_dialogue_count: 0,
+            last_known_width: 0,
         }
     }
 }
@@ -135,32 +183,26 @@ fn process_list_item_text(full_text: &str, max_width: usize, is_highlighted: boo
 
 impl App {
     pub fn render_gameplay(&mut self, frame: &mut Frame, area: Rect) {
-        // 0. 渲染前同步全局数据到局部 UI 状态
         if let Route::Gameplay(state) = &mut self.route {
             let data = save_data();
             if let Ok(guard) = data.lock() {
-                // 1. 🌟 零拷贝获取当前对白数量（直接读引用，极快）
                 let new_count = guard.history.len();
                 
-                // 2. 同步完整状态到 UI (这里必须 clone，因为要脱离 Mutex 锁的生命周期)
                 state.selected_save_data = Some(guard.clone());
 
-                // 3. 🌟 优雅的对比逻辑
                 let should_scroll = match state.last_rendered_dialogue_count {
                     Some(old_count) => new_count > old_count,
-                    None => true, // 首次渲染，强制滚到底
+                    None => true,
                 };
 
                 if should_scroll {
                     state.dialogue_scroll_offset = usize::MAX;
                 }
                 
-                // 4. 记录当前的数量，供下一帧对比
                 state.last_rendered_dialogue_count = Some(new_count);
             }
         }
 
-        // 1. 提取并接管状态
         let (mut save_data_opt, mut stats_state, mut tags_state, mut inv_state, mut dialogue_scroll, mut list_scroll_offset, selected_col) = match &mut self.route {
             Route::Gameplay(s) => (
                 s.selected_save_data.take(),
@@ -187,7 +229,6 @@ impl App {
             }
         };
 
-        // 2. 主布局
         let outer_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::White))
@@ -212,21 +253,19 @@ impl App {
             .constraints([Constraint::Percentage(40), Constraint::Percentage(30), Constraint::Percentage(30)])
             .split(top_chunks[0]);
         
-        // 3. 渲染各组件
-        Self::render_numeric_stats(save_data, frame, left_chunks[0], &mut stats_state, selected_col == ColumnType::Stats, &mut list_scroll_offset);
-        Self::render_tag_stats(save_data, frame, left_chunks[1], &mut tags_state, selected_col == ColumnType::Tags, &mut list_scroll_offset);
-        Self::render_inventory(save_data, frame, left_chunks[2], &mut inv_state, selected_col == ColumnType::Inventory, &mut list_scroll_offset);
-        Self::render_dialogue_history(save_data, frame, top_chunks[1], &mut dialogue_scroll, selected_col == ColumnType::Dialogue);
-        
-        // 4. 恢复状态并渲染底部
         if let Route::Gameplay(s) = &mut self.route {
+            Self::render_numeric_stats(save_data, frame, left_chunks[0], &mut stats_state, selected_col == ColumnType::Stats, &mut list_scroll_offset);
+            Self::render_tag_stats(save_data, frame, left_chunks[1], &mut tags_state, selected_col == ColumnType::Tags, &mut list_scroll_offset);
+            Self::render_inventory(save_data, frame, left_chunks[2], &mut inv_state, selected_col == ColumnType::Inventory, &mut list_scroll_offset);
+            Self::render_dialogue_history(save_data, frame, top_chunks[1], &mut dialogue_scroll, selected_col == ColumnType::Dialogue, s);
+
             s.selected_save_data = save_data_opt;
             s.stats_state = stats_state;
             s.tags_state = tags_state;
             s.inventory_state = inv_state;
             s.dialogue_scroll_offset = dialogue_scroll;
             s.list_scroll_offset = list_scroll_offset;
-            Self::render_input_area(frame, main_chunks[1], s); // 🌟 s 已经是可变引用
+            Self::render_input_area(frame, main_chunks[1], s);
         }
         Self::render_help_bar(frame, main_chunks[2]);
     }
@@ -320,7 +359,7 @@ impl App {
     }
 
     fn render_dialogue_history(
-        save_data: &SaveData, frame: &mut Frame, area: Rect, scroll_offset: &mut usize, is_selected: bool
+        save_data: &SaveData, frame: &mut Frame, area: Rect, scroll_offset: &mut usize, is_selected: bool, state: &mut GameplayState
     ) {
         let history = &save_data.history;
         let border_style = if is_selected { Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD) } else { Style::default().fg(Color::DarkGray) };
@@ -334,41 +373,63 @@ impl App {
             return;
         }
         
-        let mut all_lines: Vec<Line> = Vec::new();
-        let width = content_area.width.max(1) as usize;
+        let width = content_area.width.max(1);
+        let history_len = history.len();
         
-        for dialogue in history {
-            let timestamp = chrono::DateTime::from_timestamp_millis(dialogue.timestamp)
-                .map(|dt| dt.format("%H:%M:%S").to_string())
-                .unwrap_or_else(|| dialogue.timestamp.to_string());
+        // 🌟 核心优化：只有在对话数量改变，或者窗口宽度改变时，才重新解析 Markdown 和折行
+        if state.cached_dialogue_lines.is_empty() 
+            || history_len != state.last_known_dialogue_count 
+            || width != state.last_known_width 
+        {
+            let mut new_lines: Vec<Line<'static>> = Vec::new();
             
-            let (speaker_style, speaker_prefix) = match dialogue.speaker.as_str() {
-                "Narrator" => (Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD), "📖"),
-                "Player" => (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD), "👤"),
-                "System" => (Style::default().fg(Color::Red), "⚙️"),
-                _ => (Style::default().fg(Color::Cyan), "❓"),
-            };
-            
-            let prefix_str = format!("[{}] {} {}: ", timestamp, speaker_prefix, dialogue.speaker);
-            let content_str = dialogue.content.as_deref().unwrap_or("");
+            for dialogue in history {
+                let timestamp = chrono::DateTime::from_timestamp_millis(dialogue.timestamp)
+                    .map(|dt| dt.format("%H:%M:%S").to_string())
+                    .unwrap_or_else(|| dialogue.timestamp.to_string());
+                
+                let (speaker_style, speaker_prefix) = match dialogue.speaker.as_str() {
+                    "Narrator" => (Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD), "📖"),
+                    "Player" => (Style::default().fg(Color::Green).add_modifier(Modifier::BOLD), "👤"),
+                    "System" => (Style::default().fg(Color::Red), "⚙️"),
+                    _ => (Style::default().fg(Color::Cyan), "❓"),
+                };
+                
+                let prefix_str = format!("[{}] {} {}: ", timestamp, speaker_prefix, dialogue.speaker);
+                let content_str = dialogue.content.as_deref().unwrap_or("");
 
-            all_lines.push(Line::from(vec![Span::styled(prefix_str, speaker_style)]));
+                new_lines.push(Line::from(vec![Span::styled(prefix_str, speaker_style)]));
 
-            let content_lines = wrap_text(content_str, width);
-
-            for line_str in content_lines {
-                all_lines.push(Line::from(vec![Span::styled(
-                    line_str,
-                    Style::default().fg(Color::White),
-                )]));
+                // 🌟 解析 Markdown 并手动折行
+                let markdown_text = tui_markdown::from_str(content_str);
+                let wrapped_content_lines = wrap_text_lines_owned(markdown_text, width);
+                new_lines.extend(wrapped_content_lines);
+                
+                new_lines.push(Line::from("")); // 对话间距
             }
+            
+            // 更新缓存
+            state.cached_dialogue_lines = new_lines;
+            state.last_known_dialogue_count = history_len;
+            state.last_known_width = width;
         }
         
-        let max_scroll = all_lines.len().saturating_sub(content_area.height as usize);
-        if *scroll_offset > max_scroll { *scroll_offset = max_scroll; }
+        // 🌟 此时的 cached_dialogue_lines 中，1 个 Line 严格等于 1 个视觉行！
+        let all_lines = &state.cached_dialogue_lines;
         
-        let text = Text::from(all_lines);
-        let paragraph = Paragraph::new(text).scroll((*scroll_offset as u16, 0));
+        // 计算最大滚动量（现在计算出来的是绝对精确的视觉行数）
+        let max_scroll = all_lines.len().saturating_sub(content_area.height as usize);
+        if *scroll_offset > max_scroll { 
+            *scroll_offset = max_scroll; 
+        }
+        
+        let text = Text::from(all_lines.clone());
+        
+        // 🌟 移除 .wrap()！因为我们已经手动把长文本切碎了
+        let paragraph = Paragraph::new(text)
+            .scroll((*scroll_offset as u16, 0));
+            // .wrap(Wrap { trim: true })  <-- 必须删掉这行！
+            
         frame.render_widget(paragraph, content_area);
     }
 
