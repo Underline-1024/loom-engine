@@ -30,9 +30,21 @@ jobs:
           OUTPUT: CHANGES.md
           GITHUB_REPO: ${{ github.repository }}
 
+  deny-check:
+    name: Security & License Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
   build-and-release:
     name: Build and Release (${{ matrix.os }})
-    needs: changelog
+    needs: [changelog, deny-check]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -65,6 +77,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
+      - name: Generate Third-Party Licenses
+        run: |
+          cargo install cargo-about --features cli --locked
+          cargo about generate about.hbs -o THIRD-PARTY-LICENSES.html
+
       - name: Build Release Binary
         run: cargo build --release --target ${{ matrix.target }}
 
@@ -74,6 +91,7 @@ jobs:
           mkdir -p release_pkg
           cp target/${{ matrix.target }}/release/loom-engine release_pkg/
           cp -r configs release_pkg/
+          cp THIRD-PARTY-LICENSES.html release_pkg/
           tar -czvf ${{ matrix.asset_name }} -C release_pkg .
 
       - name: Package Binary (Windows)
@@ -83,6 +101,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path release_pkg
           Copy-Item target/${{ matrix.target }}/release/loom-engine.exe release_pkg/
           Copy-Item -Path configs -Destination release_pkg/ -Recurse
+          Copy-Item THIRD-PARTY-LICENSES.html -Destination release_pkg/
           Compress-Archive -Path release_pkg/* -DestinationPath ${{ matrix.asset_name }}
 
       - name: Upload to GitHub Release

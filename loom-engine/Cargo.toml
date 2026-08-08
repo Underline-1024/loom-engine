@@ -1,7 +1,9 @@
 [package]
 name = "loom-engine"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
+license = "MIT"
+license-file = "../LICENSE"
 
 [lib]
 name = "loom_engine"
@@ -34,3 +36,4 @@ ratatui-textarea = "0.9.1"
 tracing-appender = "0.2.5"
 unicode-width = "0.2.2"
 futures-util = "0.3.33"
+tui-markdown = "0.3.9"
