@@ -109,13 +109,19 @@ async fn main() -> Result<()> {
                         AppEvent::Resize => {},
                         
                         AppEvent::LlmResponse(response) => {
-                            // 1. 调用 gameplay.rs 中的方法处理 AI 回复（解析 JSON、更新 guard.history 等）
                             app.handle_llm_response(&response).await;
                             
-                            // 2. 关闭 Loading 状态，并强制滚动到底部
                             if let Route::Gameplay(state) = &mut app.route {
                                 state.is_processing = false;
                                 state.dialogue_scroll_offset = usize::MAX; 
+                            }
+                            
+                            // 🧹 同样清理 AI 思考期间积压的按键
+                            while let Ok(evt) = rx.try_recv() {
+                                if matches!(evt, AppEvent::Resize) {
+                                    let _ = tx.send(AppEvent::Resize);
+                                    break;
+                                }
                             }
                         },
                         
@@ -184,21 +190,43 @@ async fn main() -> Result<()> {
                                         _ => {},
                                     }
                                 },
-                                // 🌟 Gameplay 需要传入 tx.clone() 以便 spawn 后台任务
                                 Route::Gameplay(_) => app.handle_gameplay_input(key_event, narrator.clone(), tx.clone()).await,
                                 Route::Create(_) => app.handle_create_input(key_event, narrator.clone(), tx.clone()).await,
                                 Route::Projects(_) => app.handle_projects_input(key_event),
                                 Route::Settings(_) => app.handle_settings_input(key_event).await,
-                                Route::Saves(_) => app.handle_saves_input(key_event, narrator.clone()).await,
+                                Route::Saves(_) => app.handle_saves_input(key_event, narrator.clone(), tx.clone()).await,
                                 Route::Help => {},
                                 Route::Error(_) => {},
                             }
                             
                             // 非主菜单界面按 Esc 返回主菜单
                             if key_code == KeyCode::Esc && !matches!(app.route, Route::MainMenu) {
-                                app.navigate_to(Route::MainMenu);
+                                // 🔒 检查当前页面是否正在执行耗时操作，如果是，则屏蔽全局 Esc 返回
+                                let is_processing = match &app.route {
+                                    Route::Saves(state) => state.is_processing,
+                                    Route::Create(state) => state.is_processing,
+                                    Route::Gameplay(state) => state.is_processing,
+                                    _ => false,
+                                };
+                            
+                                if !is_processing {
+                                    app.navigate_to(Route::MainMenu);
+                                }
                             }
-                        }
+                        },
+                        AppEvent::SaveOperationCompleted => {
+                            app.on_save_operation_completed();
+                            
+                            // 🧹 清理积压的键盘事件（防止 Loading 期间的幽灵按键和秒退）
+                            while let Ok(evt) = rx.try_recv() {
+                                if matches!(evt, AppEvent::Resize) {
+                                    // 如果是窗口大小改变事件，保留它（重新发回通道）
+                                    let _ = tx.send(AppEvent::Resize);
+                                    break; 
+                                }
+                                // 其他事件（主要是 Key）直接丢弃，不做任何处理
+                            }
+                        },
                     }
                 },
             }

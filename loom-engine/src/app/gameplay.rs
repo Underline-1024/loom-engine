@@ -3,14 +3,13 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap, ListState},
+    widgets::{Block, Borders, List, ListItem, Paragraph, ListState},
     Frame,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use ratatui_textarea::TextArea;
-use tui_markdown::from_str;
 use crate::{actor::Stat, llm::Narrator, save::SaveData};
 use crate::story::Dialogue;
 use crate::llm::tool::builtin_tools::save_data;
@@ -137,29 +136,6 @@ impl GameplayState {
     }
 }
 
-// 辅助函数：手动按宽度切割文本，避免依赖外部 crate
-fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
-    let mut lines = Vec::new();
-    let mut current_line = String::new();
-    let mut current_width = 0;
-    let max_width = max_width.max(1); 
-    
-    for c in text.chars() {
-        let c_width = if c.is_ascii() { 1 } else { 2 };
-        if current_width + c_width > max_width {
-            lines.push(current_line);
-            current_line = String::new();
-            current_width = 0;
-        }
-        current_line.push(c);
-        current_width += c_width;
-    }
-    if !current_line.is_empty() { lines.push(current_line); }
-    if lines.is_empty() { lines.push(String::new()); }
-    lines
-}
-
-// 🌟 辅助函数：处理列表项文本的水平滚动与截断
 fn process_list_item_text(full_text: &str, max_width: usize, is_highlighted: bool, scroll_offset: &mut usize) -> String {
     let char_count = full_text.chars().count();
     if char_count <= max_width {

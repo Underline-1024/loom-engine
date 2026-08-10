@@ -125,6 +125,10 @@ cargo run
 | `Ctrl+N` | New | Projects page |
 | `Ctrl+D` | Delete | Projects page |
 | `E` | Edit | Projects page |
+| `Ctrl+S` | Save as new | Saves page |
+| `N` | New save | Saves page |
+| `E` | Edit note | Saves page |
+| `D` | Delete save | Saves page |
 
 ## 📄 License
 

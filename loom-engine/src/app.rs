@@ -3,6 +3,7 @@ use crossterm::event::KeyEvent;
 use gameplay::GameplayState;
 use ratatui::{self};
 use ratatui::widgets::ListState;
+use saves::SavesState;
 use settings::SettingsState;
 use crate::config::GameMode;
 use crate::llm::tool::builtin_tools::{reset_save_data, save_data};
@@ -27,7 +28,7 @@ pub enum Route {
     Gameplay(GameplayState),
     Create(CreateState),
     Error(Error),
-    Saves(ListState),
+    Saves(SavesState),
 }
 
 #[derive(Debug)]
@@ -37,6 +38,7 @@ pub enum AppEvent {
     LlmResponse(String), // 🌟 用于接收后台 LLM 的回复
     LlmError(String),    // 🌟 用于接收错误
     ProjectCreated(Result<Project, String>),
+    SaveOperationCompleted,
 }
 
 pub struct App {

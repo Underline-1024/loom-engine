@@ -128,6 +128,10 @@ cargo run
 | `Ctrl+N` | 新建 | Projects 页面 |
 | `Ctrl+D` | 删除 | Projects 页面 |
 | `E` | 编辑 | Projects 页面 |
+| `Ctrl+S` | 另存为 | Saves 页面 |
+| `N` | 创建新存档 | Saves 页面 |
+| `E` | 编辑备注 | Saves 页面 |
+| `D` | 删除存档 | Saves 页面 |
 
 ## 📄 许可证
 

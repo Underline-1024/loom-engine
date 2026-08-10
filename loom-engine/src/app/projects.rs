@@ -10,7 +10,7 @@ use crate::{app::App, save::SaveData};
 use crate::project::{list_projects, Project};
 use crate::app::Route;
 use crate::config::GameMode;
-use super::{create::CreateState, gameplay::GameplayState};
+use super::{create::CreateState, gameplay::GameplayState, saves::SavesState};
 
 impl App {
     pub fn select_project(&mut self, id: i64) -> Result<()> {
@@ -195,7 +195,7 @@ impl App {
                 if let Some(selected_index) = selected_index {
                     if let Some(Ok(project)) = self.projects.get(selected_index) {
                         let _ = self.select_project(project.timestamp());
-                        self.navigate_to(Route::Saves(ListState::default()));
+                        self.navigate_to(Route::Saves(SavesState::default()));
                         let _ = self.refresh_saves();
                     }
                 }
